@@ -138,8 +138,6 @@ class UDPHandler:
         except Exception as e:
             logger.error(f"Error processing message from {addr}: {e}")
 
-    # ... rest of UDPHandler unchanged ...
-
     def _grey_to_int(self, grey: List[int]) -> int:
         # Convert 4-bit grey code to int
         b = 0
@@ -302,7 +300,7 @@ class DBNEngine:
             messages.append((f"/R{i}_gci", rank.gci))
         return
 
-class NecromoireController:
+class FibrilController:
     def __init__(self, config: Config = None):
         self.config = config or Config()
         self.udp_handler = UDPHandler(self.config, self._process_state)
@@ -315,7 +313,7 @@ class NecromoireController:
 
     async def run(self) -> None:
         self.running = True
-        logger.info("Starting Necromoire Controller")
+        logger.info("Starting FIBRIL Controller")
         try:
             await asyncio.gather(
                 self.udp_handler.start_listener(),
@@ -333,13 +331,13 @@ class NecromoireController:
             logger.info("System running normally")
 
     async def shutdown(self) -> None:
-        logger.info("Shutting down Necromoire Controller")
+        logger.info("Shutting down FIBRIL Controller")
         self.running = False
         self.udp_handler.close()
 
 async def main():
     config = Config()
-    controller = NecromoireController(config)
+    controller = FibrilController(config)
     try:
         await controller.run()
     except KeyboardInterrupt:
