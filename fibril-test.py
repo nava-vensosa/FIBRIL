@@ -99,7 +99,45 @@ class UDPHandler:
                 logger.error(f"Error in UDP listener: {e}")
                 await asyncio.sleep(0.001)
 
-    async def process_received_message(self, data: bytes, addr: tuple) -> None:
+        async def process_received_message(self, data: bytes, addr: tuple) -> None:
+        try:
+            address, input_data, input_raw = self._decode_osc_message_raw(data)
+            logger.debug(f"Received message: address='{address}', data='{input_data}', raw={input_raw}")
+            updated = False
+
+            if address == "/sustain":
+                self.system_state.sustain = self._parse_single_int(input_data, input_raw)
+                updated = True
+            elif address == "/keyCenter":
+                self.system_state.key_center = self._parse_single_int(input_data, input_raw)
+                updated = True
+            elif address == "/rankPriority":
+                try:
+                    self.system_state.rank_priority = self._parse_int_list(input_data, input_raw)
+                except Exception:
+                    logger.warning("Could not parse /rankPriority, ignoring.")
+                updated = True
+            elif address in [f"/R{i+1}" for i in range(8)]:
+                rank_idx = int(address[2:]) - 1
+                grey_code = self._parse_int_list(input_data, input_raw)
+                # Edge case: if empty, presume [0, 0, 0, 0]
+                if not grey_code:
+                    grey_code = [0, 0, 0, 0]
+                if len(grey_code) != 4:
+                    logger.warning(f"Rank {rank_idx+1} grey code must have 4 bits, got: {grey_code}")
+                    return
+                gci = self._grey_to_int(grey_code)
+                density = sum(grey_code)  # Density is the sum of the 4 bits
+                self.system_state.ranks[rank_idx] = RankState(grey_code=grey_code, gci=gci, density=density)
+                self.system_state.global_density = sum(rank.density for rank in self.system_state.ranks)
+                updated = True
+            else:
+                logger.debug(f"Ignoring message with address: {address}")
+
+            if updated:
+                await self.message_processor(self.system_state.copy())
+        except Exception as e:
+            logger.error(f"Error processing message from {addr}: {e}")
         try:
             address, input_data, input_raw = self._decode_osc_message_raw(data)
             logger.debug(f"Received message: address='{address}', data='{input_data}', raw={input_raw}")
