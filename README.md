@@ -15,7 +15,7 @@ This ensures the initial voicing forms a **perfect fifth-based cluster**, center
 - Each Rank outputs a **4-bit Grey Code**.
 - Example: Pressing [F] yields Rank 3 → [0, 0, 0, 1]
 ## “Clavier” Layout Diagram
-
+<pre>
    R7                                         R8
 [1] [2] [3] [4]                            [9] [0] [-] [=]
        R5                                R6
@@ -24,16 +24,19 @@ This ensures the initial voicing forms a **perfect fifth-based cluster**, center
         [A] [S] [D] [F]            [J] [K] [L] [;]
                  R1                  R2
             [Z] [X] [C] [V]    [N] [M] [,] [.]
+</pre>
 ## Key Terms
 - **GCI (Grey Code Integer)**: The integer value of the Grey Code, used for internal **Voice Leading**.
 - **Rank Density**: A function of GCI that determines how many voices a Rank contributes to the overall chord.
 ## Rank Density Mapping:
-GCI    __   Example   __   Voices
-0      __   [0000]    __     0
-1      __   [0010]    __     2
-2      __   [0011]    __     3
-3      __   [1101]    __     4
-4      __   [1111]    __     6
+<pre>
+GCI       Example      Voices
+0         [0000]         0
+1         [0010]         2
+2         [0011]         3
+3         [1101]         4
+4         [1111]         6
+</pre>
 ## Tonicization & Priority
 - Each Rank has:
     - A **Rank Number** (R1–R8)
@@ -66,24 +69,25 @@ Default Priority Order:
     - **Numpad [+ / Enter]**: Increment/decrement values
 ---
 # Grey Code Modes
-
-## Mirrored Mode  __    R->L Mode <br />
-0001  1000     __    0001  0001<br />
-0011  1100     __    0011  0011<br />
-0010  0100     __    0010  0010<br />
-0110  0110     __    0110  0110<br />
-0111  1110     __    0111  0111<br />
-0101  1010     __    0101  0101<br />
-0100  0010     __    0100  0100<br />
-1100  0011     __    1100  1100<br />
-1101  1011     __    1101  1101<br />
-1111  1111     __    1111  1111<br />
-1110  0111     __    1110  1110<br />
-1010  0101     __    1010  1010<br />
-1011  1101     __    1011  1011<br />
-1001  1001     __    1001  1001<br />
-1000  0001     __    1000  1000<br />
----
+<pre>
+   ## Mirrored Mode      R->L Mode <br />
+0001  1000         0001  0001<br />
+0011  1100         0011  0011<br />
+0010  0100         0010  0010<br />
+0110  0110         0110  0110<br />
+0111  1110         0111  0111<br />
+0101  1010         0101  0101<br />
+0100  0010         0100  0100<br />
+1100  0011         1100  1100<br />
+1101  1011         1101  1101<br />
+1111  1111         1111  1111<br />
+1110  0111         1110  1110<br />
+1010  0101         1010  1010<br />
+1011  1101         1011  1011<br />
+1001  1001         1001  1001<br />
+1000  0001         1000  1000<br />
+</pre>
+   ---
 # Algorithm Overview
 ## Stored State
 - **CurrentVoicingNotes**: MIDI/Volume pairs for currently active voices
