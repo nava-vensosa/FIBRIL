@@ -72,6 +72,7 @@ class SystemState:
         return changes
 
 # --- UDP HANDLER ---
+import struct
 
 class UDPHandler:
     """Handles UDP communication with MaxMSP"""
@@ -100,34 +101,31 @@ class UDPHandler:
 
     async def process_received_message(self, data: bytes, addr: tuple) -> None:
         try:
-            address, input_data = self._decode_osc_message(data)
-            logger.debug(f"Received message: address='{address}', data='{input_data}'")
+            address, input_data, input_raw = self._decode_osc_message_raw(data)
+            logger.debug(f"Received message: address='{address}', data='{input_data}', raw={input_raw}")
             updated = False
 
             if address == "/sustain":
-                self.system_state.sustain = int(input_data)
+                self.system_state.sustain = self._parse_single_int(input_data, input_raw)
                 updated = True
             elif address == "/keyCenter":
-                self.system_state.key_center = int(input_data)
+                self.system_state.key_center = self._parse_single_int(input_data, input_raw)
                 updated = True
             elif address == "/rankPriority":
-                # Accepts space-separated or comma-separated ints, but is optional
                 try:
-                    self.system_state.rank_priority = [int(x) for x in input_data.replace(',', ' ').split()]
+                    self.system_state.rank_priority = self._parse_int_list(input_data, input_raw)
                 except Exception:
                     logger.warning("Could not parse /rankPriority, ignoring.")
                 updated = True
             elif address in [f"/R{i+1}" for i in range(8)]:
                 rank_idx = int(address[2:]) - 1
-                # Accepts [0 0 1 0] or 0 0 1 0
-                grey_code = [int(x) for x in input_data.replace('[','').replace(']','').replace(',', ' ').split()]
+                grey_code = self._parse_int_list(input_data, input_raw)
                 if len(grey_code) != 4:
                     logger.warning(f"Rank {rank_idx+1} grey code must have 4 bits, got: {grey_code}")
                     return
                 gci = self._grey_to_int(grey_code)
                 density = self._gci_to_density(gci)
                 self.system_state.ranks[rank_idx] = RankState(grey_code=grey_code, gci=gci, density=density)
-                # Update global density after any rank update
                 self.system_state.global_density = sum(rank.density for rank in self.system_state.ranks)
                 updated = True
             else:
@@ -138,8 +136,27 @@ class UDPHandler:
         except Exception as e:
             logger.error(f"Error processing message from {addr}: {e}")
 
+    def _parse_single_int(self, input_data, input_raw):
+        try:
+            return int(input_data)
+        except Exception:
+            if input_raw and len(input_raw) >= 4:
+                return struct.unpack(">i", input_raw[:4])[0]
+            return 0
+
+    def _parse_int_list(self, input_data, input_raw):
+        try:
+            return [int(x) for x in input_data.replace('[','').replace(']','').replace(',', ' ').split()]
+        except Exception:
+            if input_raw and len(input_raw) >= 4:
+                ints = []
+                for i in range(0, len(input_raw), 4):
+                    if i+4 <= len(input_raw):
+                        ints.append(struct.unpack(">i", input_raw[i:i+4])[0])
+                return ints
+            return []
+
     def _grey_to_int(self, grey: List[int]) -> int:
-        # Convert 4-bit grey code to int
         b = 0
         for bit in grey:
             b = (b << 1) | bit
@@ -151,11 +168,10 @@ class UDPHandler:
         return res
 
     def _gci_to_density(self, gci: int) -> int:
-        # Example mapping from README
         mapping = {0: 0, 1: 2, 2: 3, 3: 4, 4: 6}
-        return mapping.get(gci, gci)  # fallback: density = gci
+        return mapping.get(gci, gci)
 
-    def _decode_osc_message(self, data: bytes) -> Tuple[str, str]:
+    def _decode_osc_message_raw(self, data: bytes):
         try:
             address_end = data.find(b'\x00')
             if address_end == -1:
@@ -169,21 +185,17 @@ class UDPHandler:
                 data_tag_end = len(data)
             input_offset = (data_tag_end + 4) & ~0x03
             if input_offset >= len(data):
-                return address, ""
+                return address, "", b""
             input_data_bytes = data[input_offset:]
             try:
                 input_data = input_data_bytes.decode('utf-8').strip('\x00')
             except UnicodeDecodeError:
-                try:
-                    input_data = input_data_bytes.decode('latin-1').strip('\x00')
-                except UnicodeDecodeError:
-                    input_data = input_data_bytes.hex()
-                    logger.warning(f"Binary data received, converted to hex: {input_data}")
-            return address, input_data
+                input_data = ""
+            return address, input_data, input_data_bytes
         except Exception as e:
             logger.error(f"Error decoding OSC message: {e}")
             logger.debug(f"Raw data: {data.hex()}")
-            return "", ""
+            return "", "", b""
 
     async def send_message(self, address: str, data: int) -> None:
         try:
@@ -210,8 +222,6 @@ class UDPHandler:
         if self.socket:
             self.socket.close()
         if self.send_socket:
-            self.send_socket.close()
-
 # --- INPUT BUFFER ---
 
 class InputBuffer:
