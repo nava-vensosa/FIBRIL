@@ -69,7 +69,7 @@ Default Priority Order:
 ---
 # Grey Code Modes
 <pre>
-Mirrored Mode         R->L Mode <br />
+Mirrored Mode        R->L Mode <br />
  0001  1000         0001  0001<br />
  0011  1100         0011  0011<br />
  0010  0100         0010  0010<br />
