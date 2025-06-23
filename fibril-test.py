@@ -298,7 +298,41 @@ class DBNEngine:
             messages.append((f"/R{i}_gci", rank.gci))
         return
 
-        
+class NecromoireController:
+    def __init__(self, config: Config = None):
+        self.config = config or Config()
+        self.udp_handler = UDPHandler(self.config, self._process_state)
+        self.dbn_engine = DBNEngine(self.udp_handler)
+        self.input_buffer = InputBuffer(self.config.buffer_time_ms, self.dbn_engine.process_state)
+        self.running = False
+
+    async def _process_state(self, state: SystemState) -> None:
+        await self.input_buffer.add_state(state)
+
+    async def run(self) -> None:
+        self.running = True
+        logger.info("Starting Necromoire Controller")
+        try:
+            await asyncio.gather(
+                self.udp_handler.start_listener(),
+                self.input_buffer.process_buffer(),
+                self._monitor_system()
+            )
+        except Exception as e:
+            logger.error(f"Error in main loop: {e}")
+        finally:
+            await self.shutdown()
+
+    async def _monitor_system(self) -> None:
+        while self.running:
+            await asyncio.sleep(30)
+            logger.info("System running normally")
+
+    async def shutdown(self) -> None:
+        logger.info("Shutting down Necromoire Controller")
+        self.running = False
+        self.udp_handler.close()
+
 async def main():
     config = Config()
     controller = NecromoireController(config)
