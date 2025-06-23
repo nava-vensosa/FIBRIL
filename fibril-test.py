@@ -107,34 +107,38 @@ class UDPHandler:
             if address == "/sustain":
                 self.system_state.sustain = int(input_data)
                 updated = True
-            elif address == "/globalDensity":
-                self.system_state.global_density = int(input_data)
-                updated = True
             elif address == "/keyCenter":
                 self.system_state.key_center = int(input_data)
                 updated = True
             elif address == "/rankPriority":
-                # Accepts space-separated or comma-separated ints
-                self.system_state.rank_priority = [int(x) for x in input_data.replace(',', ' ').split()]
+                # Accepts space-separated or comma-separated ints, but is optional
+                try:
+                    self.system_state.rank_priority = [int(x) for x in input_data.replace(',', ' ').split()]
+                except Exception:
+                    logger.warning("Could not parse /rankPriority, ignoring.")
                 updated = True
             elif address in [f"/R{i+1}" for i in range(8)]:
                 rank_idx = int(address[2:]) - 1
-                grey_code = [int(x) for x in input_data.replace(',', ' ').split()]
+                # Accepts [0 0 1 0] or 0 0 1 0
+                grey_code = [int(x) for x in input_data.replace('[','').replace(']','').replace(',', ' ').split()]
                 if len(grey_code) != 4:
                     logger.warning(f"Rank {rank_idx+1} grey code must have 4 bits, got: {grey_code}")
                     return
                 gci = self._grey_to_int(grey_code)
                 density = self._gci_to_density(gci)
                 self.system_state.ranks[rank_idx] = RankState(grey_code=grey_code, gci=gci, density=density)
+                # Update global density after any rank update
+                self.system_state.global_density = sum(rank.density for rank in self.system_state.ranks)
                 updated = True
             else:
                 logger.debug(f"Ignoring message with address: {address}")
 
             if updated:
-                # Only process if something changed
                 await self.message_processor(self.system_state.copy())
         except Exception as e:
             logger.error(f"Error processing message from {addr}: {e}")
+
+    # ... rest of UDPHandler unchanged ...
 
     def _grey_to_int(self, grey: List[int]) -> int:
         # Convert 4-bit grey code to int
