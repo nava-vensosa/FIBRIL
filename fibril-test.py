@@ -100,10 +100,10 @@ class UDPHandler:
                 await asyncio.sleep(0.001)
 
         async def process_received_message(self, data: bytes, addr: tuple) -> None:
-        try:
-            address, input_data, input_raw = self._decode_osc_message_raw(data)
-            logger.debug(f"Received message: address='{address}', data='{input_data}', raw={input_raw}")
-            updated = False
+            try:
+                address, input_data, input_raw = self._decode_osc_message_raw(data)
+                logger.debug(f"Received message: address='{address}', data='{input_data}', raw={input_raw}")
+                updated = False
 
             if address == "/sustain":
                 self.system_state.sustain = self._parse_single_int(input_data, input_raw)
