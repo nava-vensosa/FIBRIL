@@ -124,7 +124,7 @@ class UDPHandler:
                     logger.warning(f"Rank {rank_idx+1} grey code must have 4 bits, got: {grey_code}")
                     return
                 gci = self._grey_to_int(grey_code)
-                density = self._gci_to_density(gci)
+                density = sum(grey_code)  # Density is the sum of the 4 bits
                 self.system_state.ranks[rank_idx] = RankState(grey_code=grey_code, gci=gci, density=density)
                 self.system_state.global_density = sum(rank.density for rank in self.system_state.ranks)
                 updated = True
@@ -166,10 +166,6 @@ class UDPHandler:
             res ^= mask
             mask >>= 1
         return res
-
-    def _gci_to_density(self, gci: int) -> int:
-        mapping = {0: 0, 1: 2, 2: 3, 3: 4, 4: 6}
-        return mapping.get(gci, gci)
 
     def _decode_osc_message_raw(self, data: bytes):
         try:
@@ -223,7 +219,6 @@ class UDPHandler:
             self.socket.close()
         if self.send_socket:
             self.send_socket.close()
-
 # --- INPUT BUFFER ---
 
 class InputBuffer:
