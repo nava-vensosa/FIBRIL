@@ -297,3 +297,19 @@ class DBNEngine:
             messages.append((f"/R{i}_density", rank.density))
             messages.append((f"/R{i}_gci", rank.gci))
         return
+
+        
+async def main():
+    config = Config()
+    controller = NecromoireController(config)
+    try:
+        await controller.run()
+    except KeyboardInterrupt:
+        logger.info("Received shutdown signal")
+    except Exception as e:
+        logger.error(f"Unexpected error: {e}")
+    finally:
+        await controller.shutdown()
+
+if __name__ == "__main__":
+    asyncio.run(main())
