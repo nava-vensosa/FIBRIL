@@ -222,6 +222,8 @@ class UDPHandler:
         if self.socket:
             self.socket.close()
         if self.send_socket:
+            self.send_socket.close()
+
 # --- INPUT BUFFER ---
 
 class InputBuffer:
