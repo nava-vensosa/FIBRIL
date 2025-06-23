@@ -15,14 +15,13 @@ This ensures the initial voicing forms a **perfect fifth-based cluster**, center
 - Each Rank outputs a **4-bit Grey Code**.
 - Example: Pressing [F] yields Rank 3 → [0, 0, 0, 1]
 ## “Clavier” Layout Diagram
-<pre>
-   R7                                         R8
+<pre>      R7                                         R8
 [1] [2] [3] [4]                            [9] [0] [-] [=]
-       R5                                R6
+          R5                                 R6
     [Q] [W] [E] [R]                    [I] [O] [P] [[]
-            R3                         R4
+              R3                         R4
         [A] [S] [D] [F]            [J] [K] [L] [;]
-                 R1                  R2
+                  R1                  R2
             [Z] [X] [C] [V]    [N] [M] [,] [.]
 </pre>
 ## Key Terms
@@ -31,11 +30,11 @@ This ensures the initial voicing forms a **perfect fifth-based cluster**, center
 ## Rank Density Mapping:
 <pre>
 GCI       Example      Voices
-0         [0000]         0
-1         [0010]         2
-2         [0011]         3
-3         [1101]         4
-4         [1111]         6
+ 0        [0000]         0
+ 1        [0010]         2
+ 2        [0011]         3
+ 3        [1101]         4
+ 4        [1111]         6
 </pre>
 ## Tonicization & Priority
 - Each Rank has:
@@ -70,22 +69,22 @@ Default Priority Order:
 ---
 # Grey Code Modes
 <pre>
-   ## Mirrored Mode      R->L Mode <br />
-0001  1000         0001  0001<br />
-0011  1100         0011  0011<br />
-0010  0100         0010  0010<br />
-0110  0110         0110  0110<br />
-0111  1110         0111  0111<br />
-0101  1010         0101  0101<br />
-0100  0010         0100  0100<br />
-1100  0011         1100  1100<br />
-1101  1011         1101  1101<br />
-1111  1111         1111  1111<br />
-1110  0111         1110  1110<br />
-1010  0101         1010  1010<br />
-1011  1101         1011  1011<br />
-1001  1001         1001  1001<br />
-1000  0001         1000  1000<br />
+Mirrored Mode         R->L Mode <br />
+ 0001  1000         0001  0001<br />
+ 0011  1100         0011  0011<br />
+ 0010  0100         0010  0010<br />
+ 0110  0110         0110  0110<br />
+ 0111  1110         0111  0111<br />
+ 0101  1010         0101  0101<br />
+ 0100  0010         0100  0100<br />
+ 1100  0011         1100  1100<br />
+ 1101  1011         1101  1101<br />
+ 1111  1111         1111  1111<br />
+ 1110  0111         1110  1110<br />
+ 1010  0101         1010  1010<br />
+ 1011  1101         1011  1011<br />
+ 1001  1001         1001  1001<br />
+ 1000  0001         1000  1000<br />
 </pre>
    ---
 # Algorithm Overview
