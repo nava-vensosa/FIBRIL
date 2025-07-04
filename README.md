@@ -147,5 +147,5 @@ Every active Rank **must voice its Root and Perfect Fifth** before any other cho
         - Edge values (20 or 127) get minimal bias
 
 Final step selects notes based on this adjusted Global Probability Map.
-
-
+---
+**The keyboard I'm using is the Leopold FC900R. Pressing Fn+Home with this keyboard on MacOS enables NKRO, which works in Max 9 (where user input is being handled)**
