@@ -2,6 +2,7 @@ import asyncio
 import socket
 import time
 import logging
+import struct
 from dataclasses import dataclass, field
 from typing import List, Dict, Set, Tuple, Callable, Any, Optional
 
@@ -9,10 +10,10 @@ from typing import List, Dict, Set, Tuple, Callable, Any, Optional
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
+# --- CONFIGURATION ---
 
 @dataclass
 class Config:
-    """Configuration settings for the Necromoire system"""
     listen_port: int = 1761
     send_port: int = 1762
     host: str = "127.0.0.1"
@@ -20,109 +21,76 @@ class Config:
     input_timeout_ms: int = 50
     num_ranks: int = 8
     rank_size: int = 4
-    expected_input_flags: Set[str] = field(default_factory=lambda: {"/uin1", "/uin2"})
+    # The set below is not used anymore, but kept for compatibility
+    expected_input_flags: Set[str] = field(default_factory=lambda: set())
 
+# --- SYSTEM STATE ---
 
 @dataclass
-class InputState:
-    """Manages dual input state from MaxMSP"""
-    uin1: str = ""
-    uin2: str = ""
-    timestamp: float = 0.0
-    is_complete: bool = False
-    
-    def add_input(self, flag: str, data: str) -> bool:
-        """Add input data and return True if both inputs received"""
-        if flag == "/uin1":
-            self.uin1 = data
-        elif flag == "/uin2":
-            self.uin2 = data
-        
-        self.timestamp = time.time()
-        self.is_complete = bool(self.uin1 and self.uin2)
-        return self.is_complete
-    
-    def get_combined_hex(self) -> str:
-        """Combine uin1 and uin2 into single hex string"""
-        return self.uin1 + self.uin2
-    
-    def reset(self) -> None:
-        """Reset for next input cycle"""
-        self.uin1 = self.uin2 = ""
-        self.is_complete = False
-
+class RankState:
+    grey_code: List[int] = field(default_factory=lambda: [0, 0, 0, 0])
+    gci: int = 0
+    density: int = 0
 
 @dataclass
 class SystemState:
-    """Manages the current state of the DBN system"""
     sustain: int = 0
-    density_function: int = 0
+    global_density: int = 0
     key_center: int = 0
-    ranks: List[List[int]] = field(default_factory=lambda: [[0]*4 for _ in range(8)])
-    
-    def update_from_combined_input(self, combined_hex: str) -> None:
-        """Parse combined uin1+uin2 hex string and update state"""
-        expected_length = 3 + (8 * 4)  # sustain + density + keyCenter + 8 ranks * 4 values
-        if len(combined_hex) != expected_length:
-            raise ValueError(f"Expected {expected_length} hex chars, got {len(combined_hex)}")
-        
-        # Parse main parameters
-        self.sustain = int(combined_hex[0], 16)
-        self.density_function = int(combined_hex[1], 16)
-        self.key_center = int(combined_hex[2], 16)
-        
-        # Parse ranks
-        for i in range(8):
-            start_idx = 3 + (i * 4)
-            end_idx = start_idx + 4
-            rank_hex = combined_hex[start_idx:end_idx]
-            self.ranks[i] = [int(char, 16) for char in rank_hex]
-    
-    def get_changes(self, previous_state: 'SystemState') -> Dict[str, Any]:
-        """Return only changed values for efficient processing"""
-        changes = {}
-        
-        if self.sustain != previous_state.sustain:
-            changes['sustain'] = self.sustain
-        if self.density_function != previous_state.density_function:
-            changes['density_function'] = self.density_function
-        if self.key_center != previous_state.key_center:
-            changes['key_center'] = self.key_center
-        
-        for i, (current_rank, prev_rank) in enumerate(zip(self.ranks, previous_state.ranks)):
-            if current_rank != prev_rank:
-                changes[f'rank_{i+1}'] = current_rank
-        
-        return changes
-    
+    rank_priority: List[int] = field(default_factory=lambda: list(range(8)))
+    ranks: List[RankState] = field(default_factory=lambda: [RankState() for _ in range(8)])
+
     def copy(self) -> 'SystemState':
-        """Create a deep copy of the current state"""
         return SystemState(
             sustain=self.sustain,
-            density_function=self.density_function,
+            global_density=self.global_density,
             key_center=self.key_center,
-            ranks=[rank.copy() for rank in self.ranks]
+            rank_priority=self.rank_priority.copy(),
+            ranks=[RankState(
+                grey_code=rank.grey_code.copy(),
+                gci=rank.gci,
+                density=rank.density
+            ) for rank in self.ranks]
         )
 
+    def get_changes(self, previous_state: 'SystemState') -> Dict[str, Any]:
+        changes = {}
+        if self.sustain != previous_state.sustain:
+            changes['sustain'] = self.sustain
+        if self.global_density != previous_state.global_density:
+            changes['global_density'] = self.global_density
+        if self.key_center != previous_state.key_center:
+            changes['key_center'] = self.key_center
+        if self.rank_priority != previous_state.rank_priority:
+            changes['rank_priority'] = self.rank_priority
+        for i, (curr, prev) in enumerate(zip(self.ranks, previous_state.ranks)):
+            if curr.grey_code != prev.grey_code or curr.gci != prev.gci or curr.density != prev.density:
+                changes[f'rank_{i+1}'] = {
+                    "grey_code": curr.grey_code,
+                    "gci": curr.gci,
+                    "density": curr.density
+                }
+        return changes
+
+# --- UDP HANDLER ---
+import struct
 
 class UDPHandler:
     """Handles UDP communication with MaxMSP"""
-    
-    def __init__(self, config: Config, message_processor: Callable[[str], None]):
+
+    def __init__(self, config: Config, message_processor: Callable[[SystemState], None]):
         self.config = config
         self.message_processor = message_processor
-        self.pending_inputs: Dict[tuple, InputState] = {}
         self.socket: Optional[socket.socket] = None
         self.send_socket: Optional[socket.socket] = None
-    
+        self.system_state = SystemState()
+        self.last_state = self.system_state.copy()
+
     async def start_listener(self) -> None:
-        """Start the UDP listener"""
         self.socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.socket.bind((self.config.host, self.config.listen_port))
         self.socket.setblocking(False)
-        
         logger.info(f"UDP Listener started on {self.config.host}:{self.config.listen_port}")
-        
         while True:
             try:
                 data, addr = await asyncio.get_event_loop().sock_recvfrom(self.socket, 1024)
@@ -130,116 +98,112 @@ class UDPHandler:
                     await self.process_received_message(data, addr)
             except Exception as e:
                 logger.error(f"Error in UDP listener: {e}")
-                await asyncio.sleep(0.001)  # Prevent tight loop on error
-    
+                await asyncio.sleep(0.001)
+
     async def process_received_message(self, data: bytes, addr: tuple) -> None:
-        """Process incoming UDP message and handle dual inputs"""
         try:
-            address, input_data = self._decode_osc_message(data)
-            logger.debug(f"Received message: address='{address}', data='{input_data}', length={len(input_data)}")
-            
-            if address in self.config.expected_input_flags:
-                await self._handle_user_input(address, input_data, addr)
-            elif address == "/uin":
-                # Handle legacy single input format
-                logger.info(f"Received legacy /uin format: '{input_data}'")
-                await self.message_processor(input_data)
+            address, input_data, input_raw = self._decode_osc_message_raw(data)
+            logger.debug(f"Received message: address='{address}', data='{input_data}', raw={input_raw}")
+            updated = False
+
+            if address == "/sustain":
+                self.system_state.sustain = self._parse_single_int(input_data, input_raw)
+                updated = True
+            elif address == "/keyCenter":
+                self.system_state.key_center = self._parse_single_int(input_data, input_raw)
+                updated = True
+            elif address == "/rankPriority":
+                try:
+                    self.system_state.rank_priority = self._parse_int_list(input_data, input_raw)
+                except Exception:
+                    logger.warning("Could not parse /rankPriority, ignoring.")
+                updated = True
+            elif address in [f"/R{i+1}" for i in range(8)]:
+                rank_idx = int(address[2:]) - 1
+                grey_code = self._parse_int_list(input_data, input_raw)
+                # Edge case: if empty, presume [0, 0, 0, 0]
+                if not grey_code:
+                    grey_code = [0, 0, 0, 0]
+                if len(grey_code) != 4:
+                    logger.warning(f"Rank {rank_idx+1} grey code must have 4 bits, got: {grey_code}")
+                    return
+                gci = self._grey_to_int(grey_code)
+                density = sum(grey_code)  # Density is the sum of the 4 bits
+                self.system_state.ranks[rank_idx] = RankState(grey_code=grey_code, gci=gci, density=density)
+                self.system_state.global_density = sum(rank.density for rank in self.system_state.ranks)
+                updated = True
             else:
                 logger.debug(f"Ignoring message with address: {address}")
+
+            if updated:
+                await self.message_processor(self.system_state.copy())
         except Exception as e:
             logger.error(f"Error processing message from {addr}: {e}")
-    
-    async def _handle_user_input(self, flag: str, data: str, addr: tuple) -> None:
-        """Handle uin1/uin2 inputs and combine when both received"""
-        session_key = addr
-        
-        if session_key not in self.pending_inputs:
-            self.pending_inputs[session_key] = InputState()
-        
-        input_state = self.pending_inputs[session_key]
-        
-        if input_state.add_input(flag, data):
-            # Both inputs received - process combined input
-            combined_hex = input_state.get_combined_hex()
-            logger.debug(f"Combined hex input: {combined_hex}")
-            await self.message_processor(combined_hex)
-            
-            # Clean up
-            del self.pending_inputs[session_key]
-        else:
-            # Start timeout timer for incomplete input
-            asyncio.create_task(self._timeout_incomplete_input(session_key))
-    
-    async def _timeout_incomplete_input(self, session_key: tuple) -> None:
-        """Clean up incomplete inputs after timeout"""
-        await asyncio.sleep(self.config.input_timeout_ms / 1000.0)
-        
-        if session_key in self.pending_inputs:
-            input_state = self.pending_inputs[session_key]
-            if not input_state.is_complete:
-                logger.warning(f"Timeout: Incomplete input from {session_key}")
-                del self.pending_inputs[session_key]
-    
-    def _decode_osc_message(self, data: bytes) -> Tuple[str, str]:
-        """Decode OSC-like message from MaxMSP"""
+
+    def _parse_single_int(self, input_data, input_raw):
         try:
-            # Find the end of the address string
+            return int(input_data)
+        except Exception:
+            if input_raw and len(input_raw) >= 4:
+                return struct.unpack(">i", input_raw[:4])[0]
+            return 0
+
+    def _parse_int_list(self, input_data, input_raw):
+        try:
+            # Handles both string and OSC int array
+            ints = [int(x) for x in input_data.replace('[','').replace(']','').replace(',', ' ').split()]
+            return ints
+        except Exception:
+            if input_raw and len(input_raw) >= 4:
+                ints = []
+                for i in range(0, len(input_raw), 4):
+                    if i+4 <= len(input_raw):
+                        ints.append(struct.unpack(">i", input_raw[i:i+4])[0])
+                return ints
+            return []
+
+    def _grey_to_int(self, grey: List[int]) -> int:
+        b = 0
+        for bit in grey:
+            b = (b << 1) | bit
+        mask = b
+        res = 0
+        while mask:
+            res ^= mask
+            mask >>= 1
+        return res
+
+    def _decode_osc_message_raw(self, data: bytes):
+        try:
             address_end = data.find(b'\x00')
             if address_end == -1:
                 raise ValueError("No null terminator found for address")
-            
-            # Decode address with error handling
             address = data[:address_end].decode('utf-8', errors='replace')
-            
-            # Adjust for OSC alignment (4-byte boundaries)
             data_offset = (address_end + 4) & ~0x03
-            
-            # Check if we have enough data
             if data_offset >= len(data):
                 raise ValueError("Insufficient data for type tags")
-            
-            # Find type tag section
             data_tag_end = data.find(b'\x00', data_offset)
             if data_tag_end == -1:
                 data_tag_end = len(data)
-            
-            # Calculate input data offset
             input_offset = (data_tag_end + 4) & ~0x03
-            
-            # Check if we have input data
             if input_offset >= len(data):
-                return address, ""
-            
-            # Try to decode input data, with fallback for binary data
+                return address, "", b""
             input_data_bytes = data[input_offset:]
-            
-            # First, try to decode as UTF-8
             try:
                 input_data = input_data_bytes.decode('utf-8').strip('\x00')
             except UnicodeDecodeError:
-                # If that fails, try latin-1 (which can handle any byte value)
-                try:
-                    input_data = input_data_bytes.decode('latin-1').strip('\x00')
-                except UnicodeDecodeError:
-                    # As a last resort, convert bytes to hex string
-                    input_data = input_data_bytes.hex()
-                    logger.warning(f"Binary data received, converted to hex: {input_data}")
-            
-            return address, input_data
-            
+                input_data = ""
+            return address, input_data, input_data_bytes
         except Exception as e:
             logger.error(f"Error decoding OSC message: {e}")
             logger.debug(f"Raw data: {data.hex()}")
-            # Return empty values to prevent crash
-            return "", ""
-    
+            return "", "", b""
+
     async def send_message(self, address: str, data: int) -> None:
-        """Send message back to MaxMSP"""
         try:
             if not self.send_socket:
                 self.send_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
                 self.send_socket.setblocking(False)
-            
             message = self._encode_osc_message(address, data)
             await asyncio.get_event_loop().sock_sendto(
                 self.send_socket, message, (self.config.host, self.config.send_port)
@@ -247,209 +211,123 @@ class UDPHandler:
             logger.debug(f"Sent message: {address} -> {data}")
         except Exception as e:
             logger.error(f"Error sending message: {e}")
-    
+
     def _encode_osc_message(self, address: str, data: int) -> bytes:
-        """Encode data into OSC-like structure"""
-        # Encode address
         encoded_addr = address.encode('utf-8') + b'\x00'
         padding = (4 - len(encoded_addr) % 4) % 4
         encoded_addr += b'\x00' * padding
-        
-        # Encode data as integer
         encoded_data = b",i\x00\x00"
         encoded_data += data.to_bytes(4, byteorder='big', signed=True)
-        
         return encoded_addr + encoded_data
-    
+
     def close(self) -> None:
-        """Close UDP sockets"""
         if self.socket:
             self.socket.close()
         if self.send_socket:
             self.send_socket.close()
-
+# --- INPUT BUFFER ---
 
 class InputBuffer:
-    """Manages input buffering with configurable timing"""
-    
-    def __init__(self, buffer_time_ms: int, processor: Callable[[str], None]):
+    def __init__(self, buffer_time_ms: int, processor: Callable[[SystemState], None]):
         self.buffer_time_ms = buffer_time_ms
         self.processor = processor
         self.buffer = []
         self.buffer_lock = asyncio.Lock()
         self.buffer_event = asyncio.Event()
-    
-    async def add_combined_input(self, combined_hex: str) -> None:
-        """Add complete combined hex input to buffer"""
+
+    async def add_state(self, state: SystemState) -> None:
         async with self.buffer_lock:
             self.buffer.append({
-                'data': combined_hex,
+                'state': state,
                 'timestamp': time.time()
             })
             self.buffer_event.set()
-    
+
     async def process_buffer(self) -> None:
-        """Process buffered inputs - takes most recent within time window"""
         while True:
             try:
                 await self.buffer_event.wait()
                 await asyncio.sleep(self.buffer_time_ms / 1000.0)
-                
                 async with self.buffer_lock:
                     if self.buffer:
-                        # Get most recent input from buffer
-                        latest_input = self.buffer[-1]['data']
+                        latest_state = self.buffer[-1]['state']
                         self.buffer.clear()
                         self.buffer_event.clear()
-                        
-                        # Process the combined input
-                        await self.processor(latest_input)
+                        await self.processor(latest_state)
             except Exception as e:
                 logger.error(f"Error in buffer processor: {e}")
                 await asyncio.sleep(0.001)
 
+# --- DBN ENGINE (ALGORITHM PLACEHOLDER) ---
 
 class DBNEngine:
-    """Dynamic Bayesian Network processing engine"""
-    
     def __init__(self, udp_handler: UDPHandler):
         self.udp_handler = udp_handler
         self.current_state = SystemState()
         self.previous_state = SystemState()
-    
-    async def process_input(self, combined_hex: str) -> None:
-        """Main processing logic for combined hex input"""
+
+    async def process_state(self, state: SystemState) -> None:
         try:
-            # Update previous state
             self.previous_state = self.current_state.copy()
-            
-            # Parse new input
-            self.current_state.update_from_combined_input(combined_hex)
-            
-            # Print all stored data
-            self._print_system_state(combined_hex)
-            
-            # Process through DBN
+            self.current_state = state.copy()
+            self._print_system_state()
             messages = await self._run_dbn_algorithm()
-            
-            # Send response messages
             for address, data in messages:
                 await self.udp_handler.send_message(address, data)
-                
         except Exception as e:
-            logger.error(f"Error processing input: {e}")
-            logger.error(f"Input that caused error: '{combined_hex}'")
-            logger.error(f"Input length: {len(combined_hex)} characters")
-            logger.error(f"Input as bytes: {combined_hex.encode('utf-8')}")
-            # Print character-by-character breakdown for debugging
-            logger.error("Character breakdown:")
-            for i, char in enumerate(combined_hex):
-                logger.error(f"  Position {i}: '{char}' (0x{ord(char):02X})")
-    
-    def _print_system_state(self, combined_hex: str) -> None:
-        """Print all stored system data for debugging"""
+            logger.error(f"Error processing state: {e}")
+
+    def _print_system_state(self) -> None:
         print("\n" + "="*60)
         print("NEW SIGNAL RECEIVED FROM MaxMSP")
         print("="*60)
-        print(f"Raw Combined Hex Input: {combined_hex}")
-        print(f"Input Length: {len(combined_hex)} characters")
-        print("-"*60)
-        print("PARSED SYSTEM STATE:")
-        print(f"  Sustain:         {self.current_state.sustain} (0x{self.current_state.sustain:X})")
-        print(f"  Density Function: {self.current_state.density_function} (0x{self.current_state.density_function:X})")
-        print(f"  Key Center:      {self.current_state.key_center} (0x{self.current_state.key_center:X})")
+        print(f"Sustain:         {self.current_state.sustain}")
+        print(f"Global Density:  {self.current_state.global_density}")
+        print(f"Key Center:      {self.current_state.key_center}")
+        print(f"Rank Priority:   {self.current_state.rank_priority}")
         print("-"*60)
         print("RANK DATA:")
         for i, rank in enumerate(self.current_state.ranks, 1):
-            hex_values = [f"0x{val:X}" for val in rank]
-            print(f"  Rank {i}: {rank} -> {hex_values}")
-        
-        # Show changes from previous state
+            print(f"  Rank {i}: Grey={rank.grey_code} GCI={rank.gci} Density={rank.density}")
         changes = self.current_state.get_changes(self.previous_state)
         if changes:
             print("-"*60)
             print("CHANGES FROM PREVIOUS STATE:")
             for key, value in changes.items():
-                if key.startswith('rank_'):
-                    rank_num = key.split('_')[1]
-                    hex_values = [f"0x{val:X}" for val in value]
-                    print(f"  {key}: {value} -> {hex_values}")
-                else:
-                    print(f"  {key}: {value} (0x{value:X})")
+                print(f"  {key}: {value}")
         else:
             print("-"*60)
             print("NO CHANGES FROM PREVIOUS STATE")
-        
         print("="*60)
         print()
-    
+
     async def _run_dbn_algorithm(self) -> List[Tuple[str, int]]:
-        """Execute DBN algorithm and return messages to send"""
-        bypass_rank = self._check_bypass_rank()
-        
-        if bypass_rank == 0:
-            # No changes - just update and send current values
-            return await self._send_current_values()
-        elif bypass_rank < 7:
-            # Run full DBN algorithm
-            return await self._execute_full_dbn()
-        else:
-            # Substitute specific rank
-            return await self._substitute_rank(bypass_rank)
-    
-    def _check_bypass_rank(self) -> int:
-        """Check which rank needs processing (0 = no changes)"""
-        for i, (current_rank, prev_rank) in enumerate(zip(self.current_state.ranks, self.previous_state.ranks)):
-            if current_rank != prev_rank:
-                return i + 1
-        return 0
-    
-    async def _send_current_values(self) -> List[Tuple[str, int]]:
-        """Send current values to MaxMSP"""
+        # Placeholder: just echo back the state for now
         messages = [
             ("/sustain", self.current_state.sustain),
+            ("/globalDensity", self.current_state.global_density),
             ("/keyCenter", self.current_state.key_center)
         ]
-        
-        # Add voicemap if needed
-        # messages.extend(await self._generate_voicemap())
-        
-        return messages
-    
-    async def _execute_full_dbn(self) -> List[Tuple[str, int]]:
-        """Execute full DBN algorithm"""
-        # Placeholder for actual DBN implementation
-        logger.info("Executing full DBN algorithm")
-        return await self._send_current_values()
-    
-    async def _substitute_rank(self, rank_index: int) -> List[Tuple[str, int]]:
-        """Execute rank substitution algorithm"""
-        # Placeholder for rank substitution implementation
-        logger.info(f"Substituting rank {rank_index}")
-        return await self._send_current_values()
+        for i, rank in enumerate(self.current_state.ranks, 1):
+            messages.append((f"/R{i}_density", rank.density))
+            messages.append((f"/R{i}_gci", rank.gci))
+        return
 
-
-class NecromoireController:
-    """Main controller for the Necromoire system"""
-    
+class FibrilController:
     def __init__(self, config: Config = None):
         self.config = config or Config()
-        self.udp_handler = UDPHandler(self.config, self._process_combined_input)
+        self.udp_handler = UDPHandler(self.config, self._process_state)
         self.dbn_engine = DBNEngine(self.udp_handler)
-        self.input_buffer = InputBuffer(self.config.buffer_time_ms, self.dbn_engine.process_input)
+        self.input_buffer = InputBuffer(self.config.buffer_time_ms, self.dbn_engine.process_state)
         self.running = False
-    
-    async def _process_combined_input(self, combined_hex: str) -> None:
-        """Process combined hex input through buffer"""
-        await self.input_buffer.add_combined_input(combined_hex)
-    
+
+    async def _process_state(self, state: SystemState) -> None:
+        await self.input_buffer.add_state(state)
+
     async def run(self) -> None:
-        """Start the main system"""
         self.running = True
-        logger.info("Starting Necromoire Controller")
-        
+        logger.info("Starting FIBRIL Controller")
         try:
-            # Start all components
             await asyncio.gather(
                 self.udp_handler.start_listener(),
                 self.input_buffer.process_buffer(),
@@ -459,25 +337,20 @@ class NecromoireController:
             logger.error(f"Error in main loop: {e}")
         finally:
             await self.shutdown()
-    
+
     async def _monitor_system(self) -> None:
-        """Monitor system health and log status"""
         while self.running:
-            await asyncio.sleep(30)  # Log status every 30 seconds
+            await asyncio.sleep(30)
             logger.info("System running normally")
-    
+
     async def shutdown(self) -> None:
-        """Graceful shutdown"""
-        logger.info("Shutting down Necromoire Controller")
+        logger.info("Shutting down FIBRIL Controller")
         self.running = False
         self.udp_handler.close()
 
-
 async def main():
-    """Main entry point"""
     config = Config()
-    controller = NecromoireController(config)
-    
+    controller = FibrilController(config)
     try:
         await controller.run()
     except KeyboardInterrupt:
@@ -486,7 +359,6 @@ async def main():
         logger.error(f"Unexpected error: {e}")
     finally:
         await controller.shutdown()
-
 
 if __name__ == "__main__":
     asyncio.run(main())
