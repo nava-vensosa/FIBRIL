@@ -100,8 +100,9 @@ def parse_osc_message(data: bytes) -> Optional[Dict[str, Any]]:
 def build_osc_response(response_data: Dict[str, Any]) -> bytes:
     """Build OSC message for sending back to MaxMSP"""
     try:
-        # Build OSC bundle with voice data
-        bundle_builder = osc_bundle_builder.OscBundleBuilder(osc_bundle_builder.IMMEDIATELY)
+        # Instead of bundles, send individual messages
+        # MaxMSP udpreceive works better with individual OSC messages
+        messages = []
         
         # Add individual voice parameter messages for changed voices
         if 'voices' in response_data:
@@ -112,24 +113,25 @@ def build_osc_response(response_data: Dict[str, Any]) -> bytes:
                 if voice.get('midi_changed', True):  # Default to True if not specified
                     midi_msg = osc_message_builder.OscMessageBuilder(f"/voice_{voice_id}_MIDI")
                     midi_msg.add_arg(voice['midi_note'])
-                    bundle_builder.add_content(midi_msg.build())
+                    messages.append(midi_msg.build().dgram)
                 
                 if voice.get('volume_changed', True):  # Default to True if not specified
                     volume_msg = osc_message_builder.OscMessageBuilder(f"/voice_{voice_id}_Volume")
                     volume_msg.add_arg(1 if voice['volume'] else 0)  # Send as integer (1 or 0)
-                    bundle_builder.add_content(volume_msg.build())
+                    messages.append(volume_msg.build().dgram)
         
         # Add summary message if provided
         if 'active_count' in response_data:
             msg_builder = osc_message_builder.OscMessageBuilder("/active_count")
             msg_builder.add_arg(response_data['active_count'])
-            bundle_builder.add_content(msg_builder.build())
+            messages.append(msg_builder.build().dgram)
         
-        return bundle_builder.build().dgram
+        # Return the first message for now (we'll send them individually)
+        return messages if messages else []
         
     except Exception as e:
         logger.error(f"Error building OSC response: {e}")
-        return b''
+        return []
 
 
 class UDPHandler:
@@ -208,14 +210,24 @@ class UDPHandler:
     async def _send_response(self, response: Dict[Any, Any]):
         """Send OSC response to MaxMSP"""
         try:
-            response_data = build_osc_response(response)
-            if response_data:
+            messages = build_osc_response(response)
+            if messages:
                 loop = asyncio.get_event_loop()
-                await loop.sock_sendto(self.send_socket, response_data, ("127.0.0.1", self.send_port))
+                
+                # Send each OSC message individually for better MaxMSP compatibility
+                total_bytes = 0
+                message_count = 0
+                for message_data in messages:
+                    if message_data:
+                        await loop.sock_sendto(self.send_socket, message_data, ("127.0.0.1", self.send_port))
+                        total_bytes += len(message_data)
+                        message_count += 1
+                        # Small delay between messages to prevent UDP flooding
+                        await asyncio.sleep(0.001)  # 1ms delay
                 
                 # Print detailed UDP message info
-                print(f"\n📤 SENDING UDP MESSAGE TO MAXMSP (Port {self.send_port}):")
-                print(f"   Response data size: {len(response_data)} bytes")
+                print(f"\n📤 SENDING {message_count} OSC MESSAGES TO MAXMSP (Port {self.send_port}):")
+                print(f"   Total data sent: {total_bytes} bytes")
                 if 'voices' in response:
                     changed_voices = response['voices']
                     print(f"   Changed voices: {len(changed_voices)}")
@@ -233,11 +245,10 @@ class UDPHandler:
                     print(f"   Total changed voices: {response['changed_count']}")
                 if 'active_count' in response:
                     print(f"   Total active voices: {response['active_count']}")
-                print(f"   Raw OSC data: {response_data[:50].hex()}{'...' if len(response_data) > 50 else ''}")
                 print("─" * 60)
                 print()  # Extra line break
                 
-                logger.debug(f"Sent OSC response: {len(response_data)} bytes")
+                logger.debug(f"Sent {message_count} OSC messages: {total_bytes} bytes total")
         except Exception as e:
             logger.error(f"Error sending OSC response: {e}")
 
