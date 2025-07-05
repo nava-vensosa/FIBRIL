@@ -325,8 +325,8 @@ def main():
     parser = argparse.ArgumentParser(description='FIBRIL 48-Voice Allocation System')
     parser.add_argument('--listen-port', type=int, default=1761,
                         help='UDP port to listen for MaxMSP messages (default: 1761)')
-    parser.add_argument('--send-port', type=int, default=1762,
-                        help='UDP port to send voice data to MaxMSP (default: 1762)')
+    parser.add_argument('--send-port', type=int, default=8998,
+                        help='UDP port to send voice data to MaxMSP (default: 8998)')
     parser.add_argument('--debug', action='store_true',
                         help='Enable debug logging')
     
