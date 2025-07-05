@@ -170,17 +170,17 @@ class UDPHandler:
 
 
 class InputBuffer:
-    """180ms timer-based processor"""
+    """220ms timer-based processor"""
     
     def __init__(self, processor: Callable):
         self.processor = processor
-        self.buffer_time = 0.180  # 180ms
+        self.buffer_time = 0.220  # 220ms
         self.running = False
     
     async def process_buffer(self):
-        """Process system state every 180ms regardless of input"""
+        """Process system state every 220ms regardless of input"""
         self.running = True
-        logger.info("Input buffer started - processing every 180ms")
+        logger.info("Input buffer started - processing every 220ms")
         
         while self.running:
             try:

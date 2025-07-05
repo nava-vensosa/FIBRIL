@@ -19,11 +19,14 @@ class Rank:
     position: int  # Priority position (1-8)
     grey_code: List[int]  # 4 bits [0,0,0,0]
     gci: int = 0  # Grey Code Integer
-    density: int = 0  # Number of 1s in grey code
+    density: int = 0  # Mapped density: 1->2, 2->3, 3->4, 4->6 ones
     
     def __post_init__(self):
         """Calculate GCI and density from grey code"""
-        self.density = sum(self.grey_code)
+        # Custom density mapping: 1->2, 2->3, 3->4, 4->6
+        ones_count = sum(self.grey_code)
+        density_map = {0: 0, 1: 2, 2: 3, 3: 4, 4: 6}
+        self.density = density_map.get(ones_count, 0)
         self.gci = self._grey_to_int(self.grey_code)
     
     def _grey_to_int(self, grey: List[int]) -> int:
