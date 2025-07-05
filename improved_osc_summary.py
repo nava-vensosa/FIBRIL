@@ -16,7 +16,7 @@ def demonstrate_improved_pattern():
     print("📋 Based on user's clean pattern:")
     print("```python")
     print("from pythonosc.udp_client import SimpleUDPClient")
-    print("client = SimpleUDPClient('127.0.0.1', 1762)")
+    print("client = SimpleUDPClient('127.0.0.1', 8998)")
     print("client.send_message('/voice_1_MIDI', 60)")
     print("```")
     print()
@@ -38,7 +38,7 @@ def demonstrate_improved_pattern():
     
     print("3. ✅ MAINTAINED COMPATIBILITY:")
     print("   - Same message format: /voice_X_MIDI, /voice_X_Volume")
-    print("   - Same target port: 1762 for MaxMSP")
+    print("   - Same target port: 8998 for MaxMSP")
     print("   - Same 48-voice display functionality")
     print()
     

@@ -12,8 +12,8 @@ def test_pythonosc_simple_udp_client():
     print("=" * 40)
     
     try:
-        # Create pythonosc SimpleUDPClient for sending to MaxMSP on port 1762
-        client = SimpleUDPClient("127.0.0.1", 1762)
+        # Create pythonosc SimpleUDPClient for sending to MaxMSP on port 8998
+        client = SimpleUDPClient("127.0.0.1", 8998)
         
         print("1. Testing OSC message sending...")
         
@@ -46,9 +46,9 @@ def test_pythonosc_simple_udp_client():
         
         print("\n✅ pythonosc SimpleUDPClient test completed!")
         print("📋 MaxMSP Check:")
-        print("   - In MaxMSP: [udpreceive 1762] → [print]")
+        print("   - In MaxMSP: [udpreceive 8998] → [print]")
         print("   - You should see the OSC messages above")
-        print("   - All messages sent to port 1762 via pythonosc")
+        print("   - All messages sent to port 8998 via pythonosc")
         
         return True
         

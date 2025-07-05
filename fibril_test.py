@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
 @dataclass
 class Config:
     listen_port: int = 1761
-    send_port: int = 1762
+    send_port: int = 8998
     host: str = "127.0.0.1"
     buffer_time_ms: int = 18
     input_timeout_ms: int = 50

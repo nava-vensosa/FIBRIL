@@ -4,7 +4,7 @@ FIBRIL UDP Handler
 
 UDP communication for FIBRIL system:
 - Listens on port 1761 for MaxMSP OSC messages
-- Sends voice data to port 1762 
+- Sends voice data to port 8998 
 - 18ms input buffer
 - Updates rank and voice objects from fibril-init.py
 """
