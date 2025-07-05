@@ -33,7 +33,7 @@ logger = logging.getLogger(__name__)
 class FibrilMain:
     """Main FIBRIL system orchestrator"""
     
-    def __init__(self, listen_port: int = 1761, send_port: int = 1762):
+    def __init__(self, listen_port: int = 1761, send_port: int = 8998):
         self.listen_port = listen_port
         self.send_port = send_port
         
