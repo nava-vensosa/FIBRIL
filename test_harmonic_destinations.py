@@ -7,9 +7,7 @@ import sys
 import importlib.util
 
 # Import fibril_classes
-spec = importlib.util.spec_from_file_location("fibril_classes", "fibril-classes.py")
-fibril_classes = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(fibril_classes)
+import fibril_classes
 
 def test_harmonic_destinations():
     """Test the harmonic destination calculation"""

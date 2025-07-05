@@ -6,7 +6,7 @@ UDP communication for FIBRIL system:
 - Listens on port 1761 for MaxMSP OSC messages
 - Sends voice data to port 1762 
 - 18ms input buffer
-- Updates rank and voice objects from fibril-init.py
+- Updates rank and voice objects from fibril_init.py
 """
 
 import asyncio
@@ -17,9 +17,7 @@ import sys
 import importlib.util
 
 # Import fibril_init to get system objects
-spec = importlib.util.spec_from_file_location("fibril_init", "fibril-init.py")
-fibril_init = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(fibril_init)
+import fibril_init
 
 from typing import Callable, Optional
 
@@ -35,7 +33,7 @@ class UDPHandler:
         self.listen_socket = None
         self.send_socket = None
         
-        # Use the initialized system from fibril-init.py
+        # Use the initialized system from fibril_init.py
         self.system = fibril_init.fibril_system
     
     async def start_listener(self):
