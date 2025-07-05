@@ -172,6 +172,22 @@ def parse_osc_message_for_fibril(data: bytes) -> Optional[Dict[str, Any]]:
                             'value': value
                         }
         
+        # Handle rank position messages like '/R1_pos', '/R2_pos', etc.
+        elif address.startswith('/R') and address.endswith('_pos'):
+            rank_part = address[1:-4]  # Remove '/R' prefix and '_pos' suffix
+            if rank_part.startswith('R') and rank_part[1:].isdigit():
+                rank_number = int(rank_part[1:])
+                
+                # Get the position value argument
+                if args and isinstance(args[0], int):
+                    position = args[0]
+                    
+                    message_dict = {
+                        'type': 'rank_position',
+                        'rank_number': rank_number,
+                        'position': position
+                    }
+        
         # Handle other message types (sustain, key center, etc.)
         elif address == '/sustain':
             if args and isinstance(args[0], int):
@@ -383,10 +399,6 @@ class UDPHandler:
     
     def _print_voice_status(self, response: Dict[Any, Any]):
         """Print a live display of all 48 voices"""
-        print("\n🎹 FIBRIL 48-VOICE STATUS:")
-        print("   Voice │ MIDI │ Vol │ Status")
-        print("   ──────┼──────┼─────┼────────")
-        
         # Create a map of voice data for quick lookup
         voice_map = {}
         if 'voices' in response:

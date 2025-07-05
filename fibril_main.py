@@ -157,6 +157,21 @@ class FibrilMain:
                                       f"grey_code={rank.grey_code}")
                             state_changed = True
         
+        # Handle rank position updates from OSC messages like '/R1_pos', '/R2_pos', etc.
+        elif message.get('type') == 'rank_position':
+            rank_number = message.get('rank_number')
+            position = message.get('position')
+            
+            if rank_number and position is not None:
+                if 1 <= rank_number <= 8:
+                    rank = self.system_state.ranks[rank_number - 1]
+                    old_position = rank.position
+                    rank.position = int(position)
+                    
+                    if old_position != rank.position:
+                        logger.info(f"Rank {rank_number} position updated: {old_position} -> {rank.position}")
+                        state_changed = True
+        
         # Handle sustain pedal updates
         elif message.get('address') == '/sustain':
             old_sustain = self.system_state.sustain
