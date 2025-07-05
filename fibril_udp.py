@@ -207,10 +207,14 @@ def send_osc_messages_simple(client: SimpleUDPClient, response_data: Dict[str, A
                 if voice.get('midi_changed', True):
                     client.send_message(f"/voice_{voice_id}_MIDI", voice['midi_note'])
                     message_count += 1
+                    # Optional small delay for message clarity (can be removed if not needed)
+                    # time.sleep(0.001)  # 1ms
                 
                 if voice.get('volume_changed', True):
                     client.send_message(f"/voice_{voice_id}_Volume", 1 if voice['volume'] else 0)
                     message_count += 1
+                    # Optional small delay for message clarity (can be removed if not needed)
+                    # time.sleep(0.001)  # 1ms
         
         # Send summary message if provided
         if 'active_count' in response_data:
@@ -260,7 +264,7 @@ class UDPHandler:
     """Handles UDP communication with MaxMSP"""
     
     def __init__(self, message_processor: Callable, listen_port: int = 1761, 
-                 send_port: int = 1762, system_state: SystemState = None):
+                 send_port: int = 8998, system_state: SystemState = None):
         self.message_processor = message_processor
         self.listen_port = listen_port
         self.send_port = send_port
@@ -293,7 +297,7 @@ class UDPHandler:
             self.listen_socket.close()
         if hasattr(self, 'listen_thread'):
             self.listen_thread.join(timeout=1.0)
-        self.osc_client.close()
+        # SimpleUDPClient doesn't need explicit closing
         logger.info("UDP Handler stopped")
     
     def _listen_loop(self):
@@ -339,6 +343,7 @@ class UDPHandler:
             if message_count > 0:
                 # Print detailed UDP message info
                 print(f"\n📤 SENT {message_count} OSC MESSAGES TO MAXMSP (Port {self.send_port}):")
+                print(f"   Target: 127.0.0.1:{self.send_port}")
                 
                 # Show active voice display
                 self._print_voice_status(response)
@@ -363,9 +368,18 @@ class UDPHandler:
                 print("─" * 60)
                 print()  # Extra line break
                 
-                logger.debug(f"Sent {message_count} OSC messages via pythonosc SimpleUDPClient")
+                logger.debug(f"Sent {message_count} OSC messages via pythonosc SimpleUDPClient to 127.0.0.1:{self.send_port}")
+            else:
+                logger.warning("No OSC messages were sent (message_count = 0)")
+                
         except Exception as e:
             logger.error(f"Error sending OSC response: {e}")
+            # Try to recreate the client if there's a connection issue
+            try:
+                self.osc_client = SimpleUDPClient("127.0.0.1", self.send_port)
+                logger.info("Recreated OSC client after error")
+            except Exception as recreate_error:
+                logger.error(f"Failed to recreate OSC client: {recreate_error}")
     
     def _print_voice_status(self, response: Dict[Any, Any]):
         """Print a live display of all 48 voices"""
