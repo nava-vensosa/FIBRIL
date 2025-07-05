@@ -9,39 +9,160 @@ UDP communication for FIBRIL system:
 - Updates rank and voice objects from fibril-init.py
 """
 
-import asyncio
 import socket
 import time
 import logging
 import json
-from typing import Callable, Optional, Dict, Any
-from pythonosc import osc_message_builder, osc_bundle_builder
-from pythonosc.osc_message import OscMessage
-from pythonosc.osc_packet import ParseError
-from pythonosc.udp_client import SimpleUDPClient
 import struct
+import math
+import threading
+from typing import Callable, Optional, Dict, Any, Union, List, Tuple
+from dataclasses import dataclass
 
 # Import FIBRIL components
 from fibril_classes import SystemState
+
+# ============================================================================
+# Minimal OSC Implementation (no external dependencies)
+# ============================================================================
+
+def pad_to_multiple_of_4(data: bytes) -> bytes:
+    """Pad data to multiple of 4 bytes (OSC requirement)"""
+    while len(data) % 4 != 0:
+        data += b'\x00'
+    return data
+
+def encode_string(s: str) -> bytes:
+    """Encode string for OSC message"""
+    return pad_to_multiple_of_4(s.encode('utf-8') + b'\x00')
+
+def encode_int(value: int) -> bytes:
+    """Encode integer for OSC message"""
+    return struct.pack('>i', value)
+
+def encode_float(value: float) -> bytes:
+    """Encode float for OSC message"""
+    return struct.pack('>f', value)
+
+def build_osc_message(address: str, *args) -> bytes:
+    """Build an OSC message from address and arguments"""
+    # Start with address
+    message = encode_string(address)
+    
+    # Build type tag string
+    type_tags = ','
+    arg_data = b''
+    
+    for arg in args:
+        if isinstance(arg, int):
+            type_tags += 'i'
+            arg_data += encode_int(arg)
+        elif isinstance(arg, float):
+            type_tags += 'f'
+            arg_data += encode_float(arg)
+        elif isinstance(arg, str):
+            type_tags += 's'
+            arg_data += encode_string(arg)
+        else:
+            # Convert to string as fallback
+            type_tags += 's'
+            arg_data += encode_string(str(arg))
+    
+    # Add type tags
+    message += encode_string(type_tags)
+    
+    # Add arguments
+    message += arg_data
+    
+    return message
+
+class SimpleOSCClient:
+    """Minimal OSC UDP client implementation"""
+    
+    def __init__(self, host: str, port: int):
+        self.host = host
+        self.port = port
+        self.socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    
+    def send_message(self, address: str, *args):
+        """Send an OSC message"""
+        message = build_osc_message(address, *args)
+        self.socket.sendto(message, (self.host, self.port))
+    
+    def close(self):
+        """Close the socket"""
+        self.socket.close()
+
+def parse_osc_string(data: bytes, offset: int) -> Tuple[str, int]:
+    """Parse OSC string from bytes"""
+    # Find null terminator
+    null_idx = data.find(b'\x00', offset)
+    if null_idx == -1:
+        raise ValueError("No null terminator found in OSC string")
+    
+    # Extract string
+    string = data[offset:null_idx].decode('utf-8')
+    
+    # Calculate next offset (padded to 4-byte boundary)
+    next_offset = null_idx + 1
+    while next_offset % 4 != 0:
+        next_offset += 1
+    
+    return string, next_offset
+
+def parse_osc_int(data: bytes, offset: int) -> Tuple[int, int]:
+    """Parse OSC int from bytes"""
+    value = struct.unpack('>i', data[offset:offset+4])[0]
+    return value, offset + 4
+
+def parse_osc_float(data: bytes, offset: int) -> Tuple[float, int]:
+    """Parse OSC float from bytes"""
+    value = struct.unpack('>f', data[offset:offset+4])[0]
+    return value, offset + 4
+
+def parse_osc_message(data: bytes) -> Tuple[str, List[Union[str, int, float]]]:
+    """Parse an OSC message from bytes"""
+    offset = 0
+    
+    # Parse address
+    address, offset = parse_osc_string(data, offset)
+    
+    # Parse type tags
+    type_tags, offset = parse_osc_string(data, offset)
+    
+    # Parse arguments
+    args = []
+    for tag in type_tags[1:]:  # Skip the leading comma
+        if tag == 's':
+            arg, offset = parse_osc_string(data, offset)
+            args.append(arg)
+        elif tag == 'i':
+            arg, offset = parse_osc_int(data, offset)
+            args.append(arg)
+        elif tag == 'f':
+            arg, offset = parse_osc_float(data, offset)
+            args.append(arg)
+        else:
+            # Skip unknown types
+            offset += 4
+    
+    return address, args
+
+# ============================================================================
+# End Minimal OSC Implementation
+# ============================================================================
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
-def parse_osc_message(data: bytes) -> Optional[Dict[str, Any]]:
-    """Parse OSC message from MaxMSP into a dictionary"""
+def parse_osc_message_for_fibril(data: bytes) -> Optional[Dict[str, Any]]:
+    """Parse OSC message from MaxMSP into FIBRIL message format"""
     try:
-        # Simple OSC parsing for FIBRIL messages
-        # OSC messages start with address pattern followed by type tags and arguments
+        # Use our generic OSC parser
+        address, args = parse_osc_message(data)
         
-        # Find the null terminator for the address
-        null_idx = data.find(b'\x00')
-        if null_idx == -1:
-            return None
-            
-        address = data[:null_idx].decode('ascii')
-        
-        # Parse FIBRIL-specific message formats
+        # Convert to FIBRIL message format
         message_dict = {'address': address}
         
         # Handle rank messages like '/R3_0100'
@@ -54,42 +175,30 @@ def parse_osc_message(data: bytes) -> Optional[Dict[str, Any]]:
                 if rank_part.startswith('R') and rank_part[1:].isdigit():
                     rank_number = int(rank_part[1:])
                     
-                    # Parse the integer argument (1 or 0)
-                    # OSC integers are 4 bytes, big-endian, after type tags
-                    try:
-                        # Find type tag section (starts after padded address)
-                        addr_len = len(address) + 1  # Include null terminator
-                        addr_padded_len = (addr_len + 3) & ~3  # Round up to multiple of 4
+                    # Get the value argument
+                    if args and isinstance(args[0], int):
+                        value = args[0]
                         
-                        # Type tags start here, should be ",i" for integer
-                        type_start = addr_padded_len
-                        if type_start < len(data) and data[type_start:type_start+2] == b',i':
-                            # Integer argument starts after padded type tags
-                            type_len = 2 + 1  # ",i" + null terminator
-                            type_padded_len = (type_len + 3) & ~3
-                            arg_start = type_start + type_padded_len
-                            
-                            if arg_start + 4 <= len(data):
-                                # Parse 4-byte big-endian integer
-                                value = struct.unpack('>i', data[arg_start:arg_start+4])[0]
-                                
-                                message_dict = {
-                                    'type': 'rank_update',
-                                    'rank_number': rank_number,
-                                    'bit_pattern': bit_part,
-                                    'value': value
-                                }
-                                
-                    except (struct.error, IndexError):
-                        logger.warning(f"Could not parse OSC integer argument from {address}")
+                        message_dict = {
+                            'type': 'rank_update',
+                            'rank_number': rank_number,
+                            'bit_pattern': bit_part,
+                            'value': value
+                        }
         
         # Handle other message types (sustain, key center, etc.)
         elif address == '/sustain':
-            # Similar parsing for sustain messages
-            pass
+            if args and isinstance(args[0], int):
+                message_dict = {
+                    'type': 'sustain',
+                    'value': args[0]
+                }
         elif address == '/key_center':
-            # Similar parsing for key center messages  
-            pass
+            if args and isinstance(args[0], int):
+                message_dict = {
+                    'type': 'key_center',
+                    'value': args[0]
+                }
             
         return message_dict
         
@@ -98,8 +207,8 @@ def parse_osc_message(data: bytes) -> Optional[Dict[str, Any]]:
         return None
 
 
-def send_osc_messages_simple(client: SimpleUDPClient, response_data: Dict[str, Any]) -> int:
-    """Send OSC messages using SimpleUDPClient - much simpler and more reliable"""
+def send_osc_messages_simple(client: SimpleOSCClient, response_data: Dict[str, Any]) -> int:
+    """Send OSC messages using our minimal OSC client"""
     message_count = 0
     
     try:
@@ -129,11 +238,10 @@ def send_osc_messages_simple(client: SimpleUDPClient, response_data: Dict[str, A
         return 0
 
 
-def build_osc_response(response_data: Dict[str, Any]) -> bytes:
-    """Build OSC message for sending back to MaxMSP"""
+def build_osc_response(response_data: Dict[str, Any]) -> List[bytes]:
+    """Build OSC messages for sending back to MaxMSP"""
     try:
-        # Instead of bundles, send individual messages
-        # MaxMSP udpreceive works better with individual OSC messages
+        # Build individual OSC messages
         messages = []
         
         # Add individual voice parameter messages for changed voices
@@ -143,23 +251,19 @@ def build_osc_response(response_data: Dict[str, Any]) -> bytes:
                 
                 # Send separate messages for MIDI note and volume if they changed
                 if voice.get('midi_changed', True):  # Default to True if not specified
-                    midi_msg = osc_message_builder.OscMessageBuilder(f"/voice_{voice_id}_MIDI")
-                    midi_msg.add_arg(voice['midi_note'])
-                    messages.append(midi_msg.build().dgram)
+                    midi_msg = build_osc_message(f"/voice_{voice_id}_MIDI", voice['midi_note'])
+                    messages.append(midi_msg)
                 
                 if voice.get('volume_changed', True):  # Default to True if not specified
-                    volume_msg = osc_message_builder.OscMessageBuilder(f"/voice_{voice_id}_Volume")
-                    volume_msg.add_arg(1 if voice['volume'] else 0)  # Send as integer (1 or 0)
-                    messages.append(volume_msg.build().dgram)
+                    volume_msg = build_osc_message(f"/voice_{voice_id}_Volume", 1 if voice['volume'] else 0)
+                    messages.append(volume_msg)
         
         # Add summary message if provided
         if 'active_count' in response_data:
-            msg_builder = osc_message_builder.OscMessageBuilder("/active_count")
-            msg_builder.add_arg(response_data['active_count'])
-            messages.append(msg_builder.build().dgram)
+            count_msg = build_osc_message("/active_count", response_data['active_count'])
+            messages.append(count_msg)
         
-        # Return the first message for now (we'll send them individually)
-        return messages if messages else []
+        return messages
         
     except Exception as e:
         logger.error(f"Error building OSC response: {e}")
@@ -179,45 +283,44 @@ class UDPHandler:
         self.system_state = system_state
         self.running = False
         
-        # Create SimpleUDPClient for sending OSC messages
-        self.osc_client = SimpleUDPClient("127.0.0.1", send_port)
+        # Create our minimal OSC client for sending messages
+        self.osc_client = SimpleOSCClient("127.0.0.1", send_port)
     
-    async def start(self):
-        """Start UDP listener and sender"""
+    def start(self):
+        """Start UDP listener in a background thread"""
         self.listen_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.listen_socket.bind(("127.0.0.1", self.listen_port))
-        self.listen_socket.setblocking(False)
-        
-        # No need for send_socket anymore - SimpleUDPClient handles it
+        self.listen_socket.settimeout(0.1)  # 100ms timeout for responsiveness
         
         self.running = True
         logger.info(f"UDP Handler listening on port {self.listen_port}, sending to {self.send_port}")
-        logger.info("Using SimpleUDPClient for OSC message sending")
+        logger.info("Using minimal OSC client for message sending")
         
-        # Start the listening loop
-        await self._listen_loop()
+        # Start the listening loop in a background thread
+        self.listen_thread = threading.Thread(target=self._listen_loop, daemon=True)
+        self.listen_thread.start()
     
-    async def stop(self):
+    def stop(self):
         """Stop UDP handler"""
         self.running = False
         if self.listen_socket:
             self.listen_socket.close()
-        # No need to close send_socket anymore - SimpleUDPClient handles it
+        if hasattr(self, 'listen_thread'):
+            self.listen_thread.join(timeout=1.0)
+        self.osc_client.close()
         logger.info("UDP Handler stopped")
     
-    async def _listen_loop(self):
+    def _listen_loop(self):
         """Main listening loop for UDP messages"""
-        loop = asyncio.get_event_loop()
-        
         while self.running:
             try:
                 # Check for incoming data
-                data, addr = await loop.sock_recvfrom(self.listen_socket, 1024)
+                data, addr = self.listen_socket.recvfrom(1024)
                 
                 if data:
                     # Parse OSC message
                     try:
-                        message = parse_osc_message(data)
+                        message = parse_osc_message_for_fibril(data)
                         if message:
                             logger.debug(f"Received OSC message from {addr}: {message}")
                             
@@ -226,7 +329,7 @@ class UDPHandler:
                             
                             # Send response if we have one
                             if response:
-                                await self._send_response(response)
+                                self._send_response(response)
                         else:
                             logger.debug(f"Could not parse OSC message from {addr}")
                             
@@ -234,15 +337,15 @@ class UDPHandler:
                         logger.error(f"Error processing OSC message: {e}")
                         logger.debug(f"Raw data: {data}")
                 
-            except socket.error:
+            except socket.timeout:
                 # No data available, continue
-                await asyncio.sleep(0.001)  # 1ms sleep
+                time.sleep(0.001)  # 1ms sleep
             except Exception as e:
                 logger.error(f"Error in listen loop: {e}")
                 break
     
-    async def _send_response(self, response: Dict[Any, Any]):
-        """Send OSC response to MaxMSP using SimpleUDPClient"""
+    def _send_response(self, response: Dict[Any, Any]):
+        """Send OSC response to MaxMSP using our minimal OSC client"""
         try:
             # Use the simple client for sending - much more reliable
             message_count = send_osc_messages_simple(self.osc_client, response)
@@ -270,7 +373,7 @@ class UDPHandler:
                 print("─" * 60)
                 print()  # Extra line break
                 
-                logger.debug(f"Sent {message_count} OSC messages via SimpleUDPClient")
+                logger.debug(f"Sent {message_count} OSC messages via minimal OSC client")
         except Exception as e:
             logger.error(f"Error sending OSC response: {e}")
 
