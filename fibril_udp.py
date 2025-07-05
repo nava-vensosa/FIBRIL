@@ -19,6 +19,9 @@ import threading
 from typing import Callable, Optional, Dict, Any, Union, List, Tuple
 from dataclasses import dataclass
 
+# Import pythonosc SimpleUDPClient for sending
+from pythonosc.udp_client import SimpleUDPClient
+
 # Import FIBRIL components
 from fibril_classes import SystemState
 
@@ -75,44 +78,6 @@ def build_osc_message(address: str, *args) -> bytes:
     message += arg_data
     
     return message
-
-class SimpleOSCClient:
-    """Minimal OSC UDP client implementation"""
-    
-    def __init__(self, host: str, port: int):
-        self.host = host
-        self.port = port
-        self.socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    
-    def send_message(self, address: str, *args):
-        """Send an OSC message"""
-        message = build_osc_message(address, *args)
-        self.socket.sendto(message, (self.host, self.port))
-    
-    def close(self):
-        """Close the socket"""
-        self.socket.close()
-
-class SimpleUDPClient:
-    """Simple UDP client for sending messages to MaxMSP"""
-    
-    def __init__(self, host: str, port: int):
-        self.host = host
-        self.port = port
-        self.socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    
-    def send_message(self, address: str, *args):
-        """Send an OSC message to MaxMSP"""
-        message = build_osc_message(address, *args)
-        self.socket.sendto(message, (self.host, self.port))
-    
-    def send_raw(self, data: bytes):
-        """Send raw bytes to MaxMSP"""
-        self.socket.sendto(data, (self.host, self.port))
-    
-    def close(self):
-        """Close the UDP socket"""
-        self.socket.close()
 
 def parse_osc_string(data: bytes, offset: int) -> Tuple[str, int]:
     """Parse OSC string from bytes"""
@@ -229,7 +194,7 @@ def parse_osc_message_for_fibril(data: bytes) -> Optional[Dict[str, Any]]:
 
 
 def send_osc_messages_simple(client: SimpleUDPClient, response_data: Dict[str, Any]) -> int:
-    """Send OSC messages using SimpleUDPClient for MaxMSP communication"""
+    """Send OSC messages using pythonosc SimpleUDPClient for MaxMSP communication"""
     message_count = 0
     
     try:
@@ -304,7 +269,7 @@ class UDPHandler:
         self.system_state = system_state
         self.running = False
         
-        # Create SimpleUDPClient for sending messages to MaxMSP
+        # Create pythonosc SimpleUDPClient for sending messages to MaxMSP
         self.osc_client = SimpleUDPClient("127.0.0.1", send_port)
     
     def start(self):
@@ -315,7 +280,7 @@ class UDPHandler:
         
         self.running = True
         logger.info(f"UDP Handler listening on port {self.listen_port}, sending to {self.send_port}")
-        logger.info("Using SimpleUDPClient for message sending to MaxMSP")
+        logger.info("Using pythonosc SimpleUDPClient for message sending to MaxMSP")
         
         # Start the listening loop in a background thread
         self.listen_thread = threading.Thread(target=self._listen_loop, daemon=True)
@@ -366,7 +331,7 @@ class UDPHandler:
                 break
     
     def _send_response(self, response: Dict[Any, Any]):
-        """Send OSC response to MaxMSP using SimpleUDPClient"""
+        """Send OSC response to MaxMSP using pythonosc SimpleUDPClient"""
         try:
             # Use the simple client for sending - much more reliable
             message_count = send_osc_messages_simple(self.osc_client, response)
@@ -394,7 +359,7 @@ class UDPHandler:
                 print("─" * 60)
                 print()  # Extra line break
                 
-                logger.debug(f"Sent {message_count} OSC messages via SimpleUDPClient")
+                logger.debug(f"Sent {message_count} OSC messages via pythonosc SimpleUDPClient")
         except Exception as e:
             logger.error(f"Error sending OSC response: {e}")
 
