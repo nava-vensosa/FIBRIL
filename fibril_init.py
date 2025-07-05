@@ -12,9 +12,7 @@ import importlib.util
 import random
 
 # Import fibril_classes
-spec = importlib.util.spec_from_file_location("fibril_classes", "fibril-classes.py")
-fibril_classes = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(fibril_classes)
+from fibril_classes import Rank, Voice, SystemState
 
 from typing import List
 
@@ -31,7 +29,7 @@ class FibrilSystem:
         # Initialize 8 ranks with default values
         self.ranks = []
         for i in range(8):
-            rank = fibril_classes.Rank(
+            rank = Rank(
                 number=i + 1,           # Rank number 1-8
                 position=i + 1,         # Initial position 1-8 
                 grey_code=[0, 0, 0, 0], # Default grey code
@@ -43,7 +41,7 @@ class FibrilSystem:
         midi_notes = [48, 55, 60, 67, 72]
         self.voices = []
         for i in range(48):
-            voice = fibril_classes.Voice(
+            voice = Voice(
                 midi_note=random.choice(midi_notes),  # Random from (48, 55, 60, 67, 72)
                 volume=False,           # Default off
                 id=i + 1               # Voice ID 1-48
@@ -51,7 +49,7 @@ class FibrilSystem:
             self.voices.append(voice)
         
         # Initialize system state
-        self.system_state = fibril_classes.SystemState()
+        self.system_state = SystemState()
         
         # Global system parameters
         self.sustain = 0

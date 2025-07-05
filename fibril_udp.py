@@ -13,15 +13,11 @@ import asyncio
 import socket
 import time
 import logging
-import sys
-import importlib.util
+import json
+from typing import Callable, Optional, Dict, Any
 
-# Import fibril_init to get system objects
-spec = importlib.util.spec_from_file_location("fibril_init", "fibril-init.py")
-fibril_init = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(fibril_init)
-
-from typing import Callable, Optional
+# Import FIBRIL components
+from fibril_classes import SystemState
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -30,24 +26,83 @@ logger = logging.getLogger(__name__)
 class UDPHandler:
     """Handles UDP communication with MaxMSP"""
     
-    def __init__(self, message_processor: Callable):
+    def __init__(self, message_processor: Callable, listen_port: int = 1761, 
+                 send_port: int = 1762, system_state: SystemState = None):
         self.message_processor = message_processor
+        self.listen_port = listen_port
+        self.send_port = send_port
         self.listen_socket = None
         self.send_socket = None
-        
-        # Use the initialized system from fibril-init.py
-        self.system = fibril_init.fibril_system
+        self.system_state = system_state
+        self.running = False
     
-    async def start_listener(self):
-        """Start UDP listener on port 1761"""
+    async def start(self):
+        """Start UDP listener and sender"""
         self.listen_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        self.listen_socket.bind(("127.0.0.1", 1761))
+        self.listen_socket.bind(("127.0.0.1", self.listen_port))
         self.listen_socket.setblocking(False)
         
         self.send_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.send_socket.setblocking(False)
         
-        logger.info("UDP Handler listening on port 1761, sending to 1762")
+        self.running = True
+        logger.info(f"UDP Handler listening on port {self.listen_port}, sending to {self.send_port}")
+        
+        # Start the listening loop
+        await self._listen_loop()
+    
+    async def stop(self):
+        """Stop UDP handler"""
+        self.running = False
+        if self.listen_socket:
+            self.listen_socket.close()
+        if self.send_socket:
+            self.send_socket.close()
+        logger.info("UDP Handler stopped")
+    
+    async def _listen_loop(self):
+        """Main listening loop for UDP messages"""
+        loop = asyncio.get_event_loop()
+        
+        while self.running:
+            try:
+                # Check for incoming data
+                data, addr = await loop.sock_recvfrom(self.listen_socket, 1024)
+                
+                if data:
+                    # Parse message (assuming JSON for now, can be adapted for OSC)
+                    try:
+                        message = json.loads(data.decode('utf-8'))
+                        logger.debug(f"Received message from {addr}: {message}")
+                        
+                        # Process message
+                        response = self.message_processor(message)
+                        
+                        # Send response if we have one
+                        if response:
+                            await self._send_response(response)
+                            
+                    except json.JSONDecodeError:
+                        logger.warning(f"Invalid JSON received from {addr}: {data}")
+                    except Exception as e:
+                        logger.error(f"Error processing message: {e}")
+                
+            except socket.error:
+                # No data available, continue
+                await asyncio.sleep(0.001)  # 1ms sleep
+            except Exception as e:
+                logger.error(f"Error in listen loop: {e}")
+                break
+    
+    async def _send_response(self, response: Dict[Any, Any]):
+        """Send response to MaxMSP"""
+        try:
+            response_data = json.dumps(response).encode('utf-8')
+            loop = asyncio.get_event_loop()
+            await loop.sock_sendto(self.send_socket, response_data, ("127.0.0.1", self.send_port))
+            logger.debug(f"Sent response: {len(response_data)} bytes")
+        except Exception as e:
+            logger.error(f"Error sending response: {e}")
         
         while True:
             try:
