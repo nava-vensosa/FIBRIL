@@ -103,16 +103,23 @@ def build_osc_response(response_data: Dict[str, Any]) -> bytes:
         # Build OSC bundle with voice data
         bundle_builder = osc_bundle_builder.OscBundleBuilder(osc_bundle_builder.IMMEDIATELY)
         
-        # Add voice messages
+        # Add individual voice parameter messages for changed voices
         if 'voices' in response_data:
             for voice in response_data['voices']:
-                # Send message like '/voice/1 60 1' (voice_id, midi_note, volume)
-                msg_builder = osc_message_builder.OscMessageBuilder(f"/voice/{voice['id']}")
-                msg_builder.add_arg(voice['midi_note'])
-                msg_builder.add_arg(voice['volume'])
-                bundle_builder.add_content(msg_builder.build())
+                voice_id = voice['id']
+                
+                # Send separate messages for MIDI note and volume if they changed
+                if voice.get('midi_changed', True):  # Default to True if not specified
+                    midi_msg = osc_message_builder.OscMessageBuilder(f"/voice_{voice_id}_MIDI")
+                    midi_msg.add_arg(voice['midi_note'])
+                    bundle_builder.add_content(midi_msg.build())
+                
+                if voice.get('volume_changed', True):  # Default to True if not specified
+                    volume_msg = osc_message_builder.OscMessageBuilder(f"/voice_{voice_id}_Volume")
+                    volume_msg.add_arg(1 if voice['volume'] else 0)  # Send as integer (1 or 0)
+                    bundle_builder.add_content(volume_msg.build())
         
-        # Add summary message
+        # Add summary message if provided
         if 'active_count' in response_data:
             msg_builder = osc_message_builder.OscMessageBuilder("/active_count")
             msg_builder.add_arg(response_data['active_count'])
@@ -205,6 +212,31 @@ class UDPHandler:
             if response_data:
                 loop = asyncio.get_event_loop()
                 await loop.sock_sendto(self.send_socket, response_data, ("127.0.0.1", self.send_port))
+                
+                # Print detailed UDP message info
+                print(f"\n📤 SENDING UDP MESSAGE TO MAXMSP (Port {self.send_port}):")
+                print(f"   Response data size: {len(response_data)} bytes")
+                if 'voices' in response:
+                    changed_voices = response['voices']
+                    print(f"   Changed voices: {len(changed_voices)}")
+                    for voice in changed_voices[:5]:  # Show first 5 changed voices
+                        changes = []
+                        if voice.get('midi_changed'):
+                            changes.append(f"MIDI: {voice['midi_note']}")
+                        if voice.get('volume_changed'):
+                            changes.append(f"Volume: {1 if voice['volume'] else 0}")
+                        change_str = ", ".join(changes)
+                        print(f"     /voice_{voice['id']}_* -> {change_str}")
+                    if len(changed_voices) > 5:
+                        print(f"     ... and {len(changed_voices) - 5} more changed voices")
+                if 'changed_count' in response:
+                    print(f"   Total changed voices: {response['changed_count']}")
+                if 'active_count' in response:
+                    print(f"   Total active voices: {response['active_count']}")
+                print(f"   Raw OSC data: {response_data[:50].hex()}{'...' if len(response_data) > 50 else ''}")
+                print("─" * 60)
+                print()  # Extra line break
+                
                 logger.debug(f"Sent OSC response: {len(response_data)} bytes")
         except Exception as e:
             logger.error(f"Error sending OSC response: {e}")

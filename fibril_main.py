@@ -57,10 +57,22 @@ class FibrilMain:
             system_state=self.system_state
         )
         
+        # Buffer timing and state tracking
+        self.buffer_time = 0.220  # 220ms buffer as specified in README
+        self.last_state_hash = None
+        self.pending_state_change = False
+        self.last_buffer_time = 0
+        self.state_change_pending = False
+        self.buffer_task = None
+        
+        # Voice change tracking for efficient OSC updates
+        self.previous_voice_states = {}  # voice_id -> {'midi': int, 'volume': bool}
+        
         logger.info("FIBRIL system initialized successfully")
         logger.info(f"Listening on port {listen_port}, sending to port {send_port}")
         logger.info(f"Total ranks: {len(self.system_state.ranks)}")
         logger.info(f"Total voices: {len(self.system_state.voices)}")
+        logger.info(f"220ms buffer enabled for state processing")
     
     def process_message(self, message: dict) -> Optional[dict]:
         """
@@ -79,19 +91,25 @@ class FibrilMain:
             if not state_changed:
                 return None
             
-            # Run FIBRIL algorithm to allocate voices
-            logger.debug("Running FIBRIL algorithm...")
-            new_state = self.algorithm.allocate_voices(self.system_state)
+            # Mark that we have a pending state change
+            self.state_change_pending = True
             
-            # Update our system state
-            self.system_state = new_state
+            # Check if we should process immediately (buffer time has passed)
+            current_time = asyncio.get_event_loop().time()
+            time_since_last_buffer = current_time - self.last_buffer_time
             
-            # Generate response message for MaxMSP
-            response = self._generate_voice_response()
-            
-            logger.info(f"Generated response with {len([v for v in self.system_state.voices if v.volume])} active voices")
-            return response
-            
+            if time_since_last_buffer >= self.buffer_time:
+                logger.debug("Buffer time exceeded, processing immediately")
+                return self._process_buffered_state_change()
+            else:
+                # Schedule buffer processing if not already scheduled
+                if self.buffer_task is None or self.buffer_task.done():
+                    remaining_time = self.buffer_time - time_since_last_buffer
+                    self.buffer_task = asyncio.create_task(self._schedule_buffer_processing(remaining_time))
+                    logger.debug(f"State change buffered, will process in {remaining_time:.3f}s")
+                
+                return None  # Don't send response yet, wait for buffer
+                
         except Exception as e:
             logger.error(f"Error processing message: {e}")
             return None
@@ -189,17 +207,46 @@ class FibrilMain:
     def _generate_voice_response(self) -> dict:
         """Generate response message for MaxMSP with current voice allocations"""
         voice_data = []
+        changed_voices = []
         
         for voice in self.system_state.voices:
-            voice_data.append({
-                'id': voice.id,
-                'midi_note': voice.midi_note,
-                'volume': 1 if voice.volume else 0
-            })
+            current_midi = voice.midi_note
+            current_volume = bool(voice.volume)
+            voice_id = voice.id
+            
+            # Check if this voice has changed since last time
+            previous_state = self.previous_voice_states.get(voice_id, {})
+            previous_midi = previous_state.get('midi', None)
+            previous_volume = previous_state.get('volume', None)
+            
+            midi_changed = previous_midi != current_midi
+            volume_changed = previous_volume != current_volume
+            
+            # Only include voices that have changed
+            if midi_changed or volume_changed:
+                voice_data.append({
+                    'id': voice_id,
+                    'midi_note': current_midi,
+                    'volume': 1 if current_volume else 0,
+                    'midi_changed': midi_changed,
+                    'volume_changed': volume_changed
+                })
+                changed_voices.append(voice_id)
+            
+            # Update our tracking
+            self.previous_voice_states[voice_id] = {
+                'midi': current_midi,
+                'volume': current_volume
+            }
+        
+        # Log changes if any
+        if changed_voices:
+            logger.debug(f"Voice changes detected for voices: {changed_voices}")
         
         return {
             'voices': voice_data,
             'active_count': sum(1 for v in self.system_state.voices if v.volume),
+            'changed_count': len(changed_voices),
             'timestamp': asyncio.get_event_loop().time()
         }
     
@@ -208,9 +255,13 @@ class FibrilMain:
         logger.info("Starting FIBRIL system...")
         
         try:
+            # Initialize buffer timing
+            self.last_buffer_time = asyncio.get_event_loop().time()
+            
             # Start UDP handler
             await self.udp_handler.start()
             logger.info("FIBRIL system is running. Press Ctrl+C to stop.")
+            logger.info("220ms input buffer active for smooth state processing")
             
             # Keep running until interrupted
             while True:
@@ -221,10 +272,55 @@ class FibrilMain:
         except Exception as e:
             logger.error(f"Error running FIBRIL system: {e}")
         finally:
-            # Cleanup
+            # Cleanup buffer task
+            if self.buffer_task and not self.buffer_task.done():
+                self.buffer_task.cancel()
+                try:
+                    await self.buffer_task
+                except asyncio.CancelledError:
+                    pass
+            
+            # Cleanup UDP handler
             if self.udp_handler:
                 await self.udp_handler.stop()
             logger.info("FIBRIL system stopped")
+    
+    async def _schedule_buffer_processing(self, delay: float):
+        """Schedule buffer processing after a delay"""
+        await asyncio.sleep(delay)
+        if self.state_change_pending:
+            response = self._process_buffered_state_change()
+            if response:
+                # Send the response through UDP handler
+                await self.udp_handler._send_response(response)
+    
+    def _process_buffered_state_change(self) -> Optional[dict]:
+        """Process accumulated state changes after buffer period"""
+        if not self.state_change_pending:
+            return None
+            
+        try:
+            # Run FIBRIL algorithm to allocate voices
+            logger.debug("Running FIBRIL algorithm (buffered)...")
+            new_state = self.algorithm.allocate_voices(self.system_state)
+            
+            # Update our system state
+            self.system_state = new_state
+            
+            # Generate response message for MaxMSP
+            response = self._generate_voice_response()
+            
+            # Update buffer timing
+            self.last_buffer_time = asyncio.get_event_loop().time()
+            self.state_change_pending = False
+            
+            logger.info(f"Generated buffered response with {len([v for v in self.system_state.voices if v.volume])} active voices")
+            return response
+            
+        except Exception as e:
+            logger.error(f"Error processing buffered state change: {e}")
+            self.state_change_pending = False
+            return None
 
 
 def main():
