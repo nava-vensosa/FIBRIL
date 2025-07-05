@@ -9,7 +9,8 @@ Usage:
     python fibril_main.py
 """
 
-import asyncio
+import time
+import threading
 import sys
 import logging
 import argparse
@@ -95,7 +96,7 @@ class FibrilMain:
             self.state_change_pending = True
             
             # Check if we should process immediately (buffer time has passed)
-            current_time = asyncio.get_event_loop().time()
+            current_time = time.time()
             time_since_last_buffer = current_time - self.last_buffer_time
             
             if time_since_last_buffer >= self.buffer_time:
@@ -103,9 +104,10 @@ class FibrilMain:
                 return self._process_buffered_state_change()
             else:
                 # Schedule buffer processing if not already scheduled
-                if self.buffer_task is None or self.buffer_task.done():
+                if self.buffer_task is None or not self.buffer_task.is_alive():
                     remaining_time = self.buffer_time - time_since_last_buffer
-                    self.buffer_task = asyncio.create_task(self._schedule_buffer_processing(remaining_time))
+                    self.buffer_task = threading.Timer(remaining_time, self._delayed_buffer_processing)
+                    self.buffer_task.start()
                     logger.debug(f"State change buffered, will process in {remaining_time:.3f}s")
                 
                 return None  # Don't send response yet, wait for buffer
@@ -247,25 +249,25 @@ class FibrilMain:
             'voices': voice_data,
             'active_count': sum(1 for v in self.system_state.voices if v.volume),
             'changed_count': len(changed_voices),
-            'timestamp': asyncio.get_event_loop().time()
+            'timestamp': time.time()
         }
     
-    async def run(self):
+    def run(self):
         """Start the FIBRIL system"""
         logger.info("Starting FIBRIL system...")
         
         try:
             # Initialize buffer timing
-            self.last_buffer_time = asyncio.get_event_loop().time()
+            self.last_buffer_time = time.time()
             
             # Start UDP handler
-            await self.udp_handler.start()
+            self.udp_handler.start()
             logger.info("FIBRIL system is running. Press Ctrl+C to stop.")
             logger.info("220ms input buffer active for smooth state processing")
             
             # Keep running until interrupted
             while True:
-                await asyncio.sleep(1)
+                time.sleep(1)
                 
         except KeyboardInterrupt:
             logger.info("Shutting down FIBRIL system...")
@@ -273,26 +275,21 @@ class FibrilMain:
             logger.error(f"Error running FIBRIL system: {e}")
         finally:
             # Cleanup buffer task
-            if self.buffer_task and not self.buffer_task.done():
+            if self.buffer_task and self.buffer_task.is_alive():
                 self.buffer_task.cancel()
-                try:
-                    await self.buffer_task
-                except asyncio.CancelledError:
-                    pass
             
             # Cleanup UDP handler
             if self.udp_handler:
-                await self.udp_handler.stop()
+                self.udp_handler.stop()
             logger.info("FIBRIL system stopped")
     
-    async def _schedule_buffer_processing(self, delay: float):
-        """Schedule buffer processing after a delay"""
-        await asyncio.sleep(delay)
+    def _delayed_buffer_processing(self):
+        """Process buffer after delay (called by threading.Timer)"""
         if self.state_change_pending:
             response = self._process_buffered_state_change()
             if response:
                 # Send the response through UDP handler
-                await self.udp_handler._send_response(response)
+                self.udp_handler._send_response(response)
     
     def _process_buffered_state_change(self) -> Optional[dict]:
         """Process accumulated state changes after buffer period"""
@@ -311,7 +308,7 @@ class FibrilMain:
             response = self._generate_voice_response()
             
             # Update buffer timing
-            self.last_buffer_time = asyncio.get_event_loop().time()
+            self.last_buffer_time = time.time()
             self.state_change_pending = False
             
             logger.info(f"Generated buffered response with {len([v for v in self.system_state.voices if v.volume])} active voices")
@@ -345,7 +342,7 @@ def main():
     )
     
     try:
-        asyncio.run(fibril_main.run())
+        fibril_main.run()
     except KeyboardInterrupt:
         logger.info("Interrupted by user")
         sys.exit(0)
