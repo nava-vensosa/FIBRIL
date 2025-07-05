@@ -9,6 +9,7 @@ Initialize all rank and voice objects for the FIBRIL system:
 
 import sys
 import importlib.util
+import random
 
 # Import fibril_classes
 spec = importlib.util.spec_from_file_location("fibril_classes", "fibril-classes.py")
@@ -22,25 +23,35 @@ class FibrilSystem:
     """Container for all FIBRIL system objects"""
     
     def __init__(self):
+        # Updated tonicization mapping per user request:
+        # R1: tonic, R2: supertonic, R3: mediant, R4: subdominant,
+        # R5: dominant, R6: submediant, R7: leading tone, R8: subtonic
+        default_tonicizations = [1, 2, 3, 4, 5, 6, 7, 8]
+        
         # Initialize 8 ranks with default values
         self.ranks = []
         for i in range(8):
             rank = fibril_classes.Rank(
                 number=i + 1,           # Rank number 1-8
                 position=i + 1,         # Initial position 1-8 
-                grey_code=[0, 0, 0, 0]  # Default grey code
+                grey_code=[0, 0, 0, 0], # Default grey code
+                tonicization=default_tonicizations[i]  # Default scale degree
             )
             self.ranks.append(rank)
         
-        # Initialize 48 voices with default values
+        # Initialize 48 voices with random MIDI notes from specified set
+        midi_notes = [48, 55, 60, 67, 72]
         self.voices = []
         for i in range(48):
             voice = fibril_classes.Voice(
-                midi_note=60,           # Default middle C
+                midi_note=random.choice(midi_notes),  # Random from (48, 55, 60, 67, 72)
                 volume=False,           # Default off
                 id=i + 1               # Voice ID 1-48
             )
             self.voices.append(voice)
+        
+        # Initialize system state
+        self.system_state = fibril_classes.SystemState()
         
         # Global system parameters
         self.sustain = 0
