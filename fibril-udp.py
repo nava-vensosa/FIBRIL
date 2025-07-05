@@ -60,11 +60,11 @@ class UDPHandler:
                 await asyncio.sleep(0.001)
     
     async def process_message(self, data: bytes):
-        """Process incoming OSC message and update appropriate objects"""
+        """Process incoming OSC message and update system state silently"""
         try:
             address, value = self._decode_osc(data)
-            logger.debug(f"Received: {address} = {value}")
             
+            # Update system state without logging (silent updates)
             # Handle rank grey code bits (e.g., /R1_1000, /R2_0100, etc.)
             if address.startswith('/R') and '_' in address:
                 parts = address.split('_')
@@ -74,33 +74,28 @@ class UDPHandler:
                 if bit_pattern in ['1000', '0100', '0010', '0001']:
                     # Convert value to 0 or 1 (handle any non-zero as 1)
                     bit_value = 1 if value else 0
-                    self.system.update_rank_grey_bit(rank_num, bit_pattern, bit_value)
-                    
-                    # Get updated rank for debugging
+                    # Update silently - no print statements
                     rank = self.system.get_rank(rank_num)
-                    logger.debug(f"Updated Rank {rank_num} bit {bit_pattern} = {bit_value}")
-                    logger.debug(f"Rank {rank_num} grey_code now: {rank.grey_code}, GCI: {rank.gci}, Density: {rank.density}")
+                    bit_map = {'1000': 0, '0100': 1, '0010': 2, '0001': 3}
+                    bit_index = bit_map[bit_pattern]
+                    rank.grey_code[bit_index] = bit_value
+                    rank.__post_init__()  # Recalculate GCI and density
             
             # Handle rank positions (e.g., /R1_pos, /R2_pos, etc.)
             elif address.startswith('/R') and address.endswith('_pos'):
                 rank_num = int(address[2:address.find('_')])
-                self.system.update_rank_position(rank_num, value)
-                logger.debug(f"Updated Rank {rank_num} position = {value}")
+                rank = self.system.get_rank(rank_num)
+                rank.position = value
             
             # Handle global parameters
             elif address == '/sustain':
                 self.system.sustain = value
-                logger.debug(f"Updated sustain = {value}")
                 
             elif address == '/keyCenter':
                 self.system.key_center = value
-                logger.debug(f"Updated key center = {value}")
             
-            else:
-                logger.debug(f"Ignoring unknown address: {address}")
-            
-            # Process through message processor with buffer
-            await self.message_processor()
+            # Don't trigger buffer processing for each message
+            # The buffer will process on its own 18ms timer
             
         except Exception as e:
             logger.error(f"Message processing error: {e}")
@@ -175,57 +170,53 @@ class UDPHandler:
 
 
 class InputBuffer:
-    """18ms input buffer"""
+    """18ms timer-based processor"""
     
     def __init__(self, processor: Callable):
         self.processor = processor
-        self.buffer = []
-        self.buffer_lock = asyncio.Lock()
-        self.buffer_event = asyncio.Event()
         self.buffer_time = 0.018  # 18ms
-    
-    async def add_update(self):
-        """Add an update to the buffer"""
-        async with self.buffer_lock:
-            self.buffer.append(time.time())
-            self.buffer_event.set()
+        self.running = False
     
     async def process_buffer(self):
-        """Process buffer with 18ms delay"""
-        while True:
+        """Process system state every 18ms regardless of input"""
+        self.running = True
+        logger.info("Input buffer started - processing every 18ms")
+        
+        while self.running:
             try:
-                await self.buffer_event.wait()
+                # Wait exactly 18ms
                 await asyncio.sleep(self.buffer_time)
                 
-                async with self.buffer_lock:
-                    if self.buffer:
-                        self.buffer.clear()
-                        self.buffer_event.clear()
-                        await self.processor()
-                        
+                # Process current system state
+                await self.processor()
+                
             except Exception as e:
                 logger.error(f"Buffer error: {e}")
                 await asyncio.sleep(0.001)
+    
+    def stop(self):
+        """Stop the buffer processor"""
+        self.running = False
 
 
 class FibrilUDP:
     """Main FIBRIL UDP controller"""
     
     def __init__(self):
-        self.udp_handler = UDPHandler(self._process_update)
+        self.udp_handler = UDPHandler(self._dummy_processor)  # No longer needs message processor
         self.input_buffer = InputBuffer(self._process_buffered_update)
         self.running = False
     
-    async def _process_update(self):
-        """Handle immediate update from UDP"""
-        await self.input_buffer.add_update()
+    async def _dummy_processor(self):
+        """Dummy processor - not used anymore"""
+        pass
     
     async def _process_buffered_update(self):
-        """Handle buffered update after 18ms delay"""
-        # Print current system state
+        """Handle system state update every 18ms"""
+        # Print current system state (only every 18ms)
         self.udp_handler.system.print_system_state()
         
-        # Example algorithm: send voice data based on rank densities
+        # Run voice allocation algorithm
         await self._run_voice_algorithm()
     
     async def _run_voice_algorithm(self):

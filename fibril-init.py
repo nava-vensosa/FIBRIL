@@ -65,19 +65,12 @@ class FibrilSystem:
         bit_map = {'1000': 0, '0100': 1, '0010': 2, '0001': 3}
         if bit_pattern in bit_map:
             bit_index = bit_map[bit_pattern]
-            old_grey_code = rank.grey_code.copy()
             
             # Set the specific bit (ensure it's 0 or 1)
             rank.grey_code[bit_index] = 1 if value else 0
             
             # Recalculate GCI and density
             rank.__post_init__()
-            
-            print(f"Rank {rank_num}: Updated bit {bit_pattern} -> {rank.grey_code[bit_index]}")
-            print(f"  Grey code: {old_grey_code} -> {rank.grey_code}")
-            print(f"  GCI: {rank.gci}, Density: {rank.density}")
-        else:
-            print(f"Warning: Unknown bit pattern '{bit_pattern}' for rank {rank_num}")
     
     def update_rank_position(self, rank_num: int, position: int):
         """Update rank position"""
