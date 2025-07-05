@@ -89,7 +89,7 @@ class FibrilMain:
             # Generate response message for MaxMSP
             response = self._generate_voice_response()
             
-            logger.debug(f"Generated response with {len([v for v in self.system_state.voices if v.volume])} active voices")
+            logger.info(f"Generated response with {len([v for v in self.system_state.voices if v.volume])} active voices")
             return response
             
         except Exception as e:
@@ -98,14 +98,61 @@ class FibrilMain:
     
     def _update_system_state(self, message: dict) -> bool:
         """
-        Update system state based on incoming message
+        Update system state based on incoming OSC message
         
         Returns:
             bool: True if state changed, False otherwise
         """
         state_changed = False
         
-        # Update sustain pedal
+        # Handle rank updates from OSC messages like '/R3_0100'
+        if message.get('type') == 'rank_update':
+            rank_number = message.get('rank_number')
+            bit_pattern = message.get('bit_pattern')
+            value = message.get('value')
+            
+            if rank_number and bit_pattern and value is not None:
+                if 1 <= rank_number <= 8:
+                    rank = self.system_state.ranks[rank_number - 1]
+                    
+                    # Store previous GCI for voice leading
+                    rank.previous_gci = rank.gci
+                    
+                    # Update the specific bit based on the pattern
+                    bit_map = {'1000': 0, '0100': 1, '0010': 2, '0001': 3}
+                    if bit_pattern in bit_map:
+                        bit_index = bit_map[bit_pattern]
+                        old_grey_code = rank.grey_code.copy()
+                        
+                        # Set the specific bit (1 if value > 0, 0 otherwise)
+                        rank.grey_code[bit_index] = 1 if value > 0 else 0
+                        
+                        # Recalculate GCI and density
+                        rank.__post_init__()
+                        
+                        if old_grey_code != rank.grey_code:
+                            logger.info(f"Rank {rank_number} bit {bit_pattern} -> {value}: "
+                                      f"GCI={rank.gci}, density={rank.density}, "
+                                      f"grey_code={rank.grey_code}")
+                            state_changed = True
+        
+        # Handle sustain pedal updates
+        elif message.get('address') == '/sustain':
+            old_sustain = self.system_state.sustain
+            self.system_state.sustain = bool(message.get('value', 0))
+            if old_sustain != self.system_state.sustain:
+                logger.info(f"Sustain pedal: {'ON' if self.system_state.sustain else 'OFF'}")
+                state_changed = True
+        
+        # Handle key center updates
+        elif message.get('address') == '/key_center':
+            old_key = self.system_state.key_center
+            self.system_state.key_center = int(message.get('value', 0)) % 12
+            if old_key != self.system_state.key_center:
+                logger.info(f"Key center changed to: {self.system_state.key_center}")
+                state_changed = True
+        
+        # Legacy support for direct updates (for testing)
         if 'sustain' in message:
             old_sustain = self.system_state.sustain
             self.system_state.sustain = bool(message['sustain'])
@@ -113,7 +160,6 @@ class FibrilMain:
                 logger.info(f"Sustain pedal: {'ON' if self.system_state.sustain else 'OFF'}")
                 state_changed = True
         
-        # Update key center
         if 'key_center' in message:
             old_key = self.system_state.key_center
             self.system_state.key_center = int(message['key_center']) % 12
@@ -121,7 +167,6 @@ class FibrilMain:
                 logger.info(f"Key center changed to: {self.system_state.key_center}")
                 state_changed = True
         
-        # Update rank grey codes
         if 'ranks' in message:
             for rank_data in message['ranks']:
                 rank_number = rank_data.get('number')
