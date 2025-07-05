@@ -197,6 +197,10 @@ class SystemState:
     # Priority order for rank evaluation
     rank_priority: List[int] = None  # Will be [3, 6, 1, 4, 5, 2, 8, 7] by default
     
+    # Core state
+    ranks: List[Rank] = None  # All ranks in the system
+    voices: List[Voice] = None  # All voices in the system
+    
     # Algorithm state
     global_probability_map: List[float] = None  # Global probability weights
     sustained_notes: List[int] = None  # Currently sustained MIDI notes
@@ -216,3 +220,42 @@ class SystemState:
         
         if self.current_voicing_notes is None:
             self.current_voicing_notes = []
+        
+        if self.ranks is None:
+            self.ranks = []
+        
+        if self.voices is None:
+            self.voices = []
+    
+    def copy(self) -> 'SystemState':
+        """Create a deep copy of the system state"""
+        new_state = SystemState(
+            sustain=self.sustain,
+            key_center=self.key_center,
+            right_hand_mode=self.right_hand_mode,
+            rank_priority=self.rank_priority.copy() if self.rank_priority else None
+        )
+        
+        # Deep copy ranks and voices
+        if self.ranks:
+            new_state.ranks = [rank.copy() for rank in self.ranks]
+        
+        if self.voices:
+            new_state.voices = []
+            for voice in self.voices:
+                new_voice = Voice(
+                    midi_note=voice.midi_note,
+                    volume=voice.volume,
+                    id=voice.id
+                )
+                new_state.voices.append(new_voice)
+        
+        # Copy other lists
+        if self.global_probability_map:
+            new_state.global_probability_map = self.global_probability_map.copy()
+        if self.sustained_notes:
+            new_state.sustained_notes = self.sustained_notes.copy()
+        if self.current_voicing_notes:
+            new_state.current_voicing_notes = self.current_voicing_notes.copy()
+        
+        return new_state
