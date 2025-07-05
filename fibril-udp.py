@@ -170,21 +170,21 @@ class UDPHandler:
 
 
 class InputBuffer:
-    """18ms timer-based processor"""
+    """180ms timer-based processor"""
     
     def __init__(self, processor: Callable):
         self.processor = processor
-        self.buffer_time = 0.018  # 18ms
+        self.buffer_time = 0.180  # 180ms
         self.running = False
     
     async def process_buffer(self):
-        """Process system state every 18ms regardless of input"""
+        """Process system state every 180ms regardless of input"""
         self.running = True
-        logger.info("Input buffer started - processing every 18ms")
+        logger.info("Input buffer started - processing every 180ms")
         
         while self.running:
             try:
-                # Wait exactly 18ms
+                # Wait exactly 180ms
                 await asyncio.sleep(self.buffer_time)
                 
                 # Process current system state
@@ -206,18 +206,67 @@ class FibrilUDP:
         self.udp_handler = UDPHandler(self._dummy_processor)  # No longer needs message processor
         self.input_buffer = InputBuffer(self._process_buffered_update)
         self.running = False
+        
+        # Store previous state for change detection
+        self.previous_state = None
     
     async def _dummy_processor(self):
         """Dummy processor - not used anymore"""
         pass
     
     async def _process_buffered_update(self):
-        """Handle system state update every 18ms"""
-        # Print current system state (only every 18ms)
-        self.udp_handler.system.print_system_state()
+        """Handle system state update every 180ms"""
+        # Get current system state
+        current_state = self._get_current_state()
         
-        # Run voice allocation algorithm
-        await self._run_voice_algorithm()
+        # Check if state has changed
+        if self._has_state_changed(current_state):
+            # Print current system state (only when changed)
+            self.udp_handler.system.print_system_state()
+            
+            # Run voice allocation algorithm
+            await self._run_voice_algorithm()
+            
+            # Update previous state
+            self.previous_state = current_state
+    
+    def _get_current_state(self):
+        """Get a snapshot of current system state for comparison"""
+        system = self.udp_handler.system
+        return {
+            'sustain': system.sustain,
+            'key_center': system.key_center,
+            'ranks': [
+                {
+                    'number': rank.number,
+                    'position': rank.position,
+                    'grey_code': rank.grey_code.copy(),
+                    'gci': rank.gci,
+                    'density': rank.density
+                }
+                for rank in system.ranks
+            ]
+        }
+    
+    def _has_state_changed(self, current_state):
+        """Check if current state differs from previous state"""
+        if self.previous_state is None:
+            return True  # First time, always print
+        
+        # Check global parameters
+        if (current_state['sustain'] != self.previous_state['sustain'] or
+            current_state['key_center'] != self.previous_state['key_center']):
+            return True
+        
+        # Check each rank
+        for curr_rank, prev_rank in zip(current_state['ranks'], self.previous_state['ranks']):
+            if (curr_rank['position'] != prev_rank['position'] or
+                curr_rank['grey_code'] != prev_rank['grey_code'] or
+                curr_rank['gci'] != prev_rank['gci'] or
+                curr_rank['density'] != prev_rank['density']):
+                return True
+        
+        return False
     
     async def _run_voice_algorithm(self):
         """Example voice allocation algorithm"""
