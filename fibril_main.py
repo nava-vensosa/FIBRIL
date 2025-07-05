@@ -71,9 +71,10 @@ class FibrilMain:
         
         logger.info("FIBRIL system initialized successfully")
         logger.info(f"Listening on port {listen_port}, sending to port {send_port}")
-        logger.info(f"Total ranks: {len(self.system_state.ranks)}")
-        logger.info(f"Total voices: {len(self.system_state.voices)}")
         logger.info(f"220ms buffer enabled for state processing")
+        
+        # Display initial system state
+        self.display_system_state()
     
     def process_message(self, message: dict) -> Optional[dict]:
         """
@@ -311,14 +312,46 @@ class FibrilMain:
             self.last_buffer_time = time.time()
             self.state_change_pending = False
             
-            logger.info(f"Generated buffered response with {len([v for v in self.system_state.voices if v.volume])} active voices")
+            active_voice_count = len([v for v in self.system_state.voices if v.volume])
+            logger.info(f"Generated buffered response with {active_voice_count} active voices")
+            
+            # Display updated system state
+            self.display_system_state()
+            
             return response
             
         except Exception as e:
             logger.error(f"Error processing buffered state change: {e}")
             self.state_change_pending = False
             return None
-
+    
+    def display_system_state(self):
+        """Display current system state in formatted output"""
+        print("\n" + "=" * 80)
+        print("FIBRIL SYSTEM STATE")
+        print("=" * 80)
+        
+        # Display ranks
+        print("\nRANKS:")
+        print("Number | Position | Grey Code    | GCI | Density")
+        print("-------|----------|--------------|-----|--------")
+        for rank in self.system_state.ranks:
+            grey_str = f"[{','.join(map(str, rank.grey_code))}]"
+            print(f"  {rank.number:2d}   |    {rank.position:2d}    | {grey_str:12s} | {rank.gci:3d} |   {rank.density:2d}")
+        
+        # Display voices
+        print("\nVOICES:")
+        print("ID  | MIDI | Volume")
+        print("----|------|-------")
+        for voice in self.system_state.voices:
+            volume_str = "ON " if voice.volume else "OFF"
+            print(f"{voice.id:3d} | {voice.midi_note:4d} | {volume_str}")
+        
+        # Display system parameters
+        print(f"\nSYSTEM PARAMETERS:")
+        print(f"Key Center: {self.system_state.key_center}")
+        print(f"Sustain: {'ON' if self.system_state.sustain else 'OFF'}")
+        print("=" * 80)
 
 def main():
     """Command line entry point"""
