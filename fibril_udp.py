@@ -339,6 +339,10 @@ class UDPHandler:
             if message_count > 0:
                 # Print detailed UDP message info
                 print(f"\n📤 SENT {message_count} OSC MESSAGES TO MAXMSP (Port {self.send_port}):")
+                
+                # Show active voice display
+                self._print_voice_status(response)
+                
                 if 'voices' in response:
                     changed_voices = response['voices']
                     print(f"   Changed voices: {len(changed_voices)}")
@@ -362,4 +366,69 @@ class UDPHandler:
                 logger.debug(f"Sent {message_count} OSC messages via pythonosc SimpleUDPClient")
         except Exception as e:
             logger.error(f"Error sending OSC response: {e}")
+    
+    def _print_voice_status(self, response: Dict[Any, Any]):
+        """Print a live display of all 48 voices"""
+        print("\n🎹 FIBRIL 48-VOICE STATUS:")
+        print("   Voice │ MIDI │ Vol │ Status")
+        print("   ──────┼──────┼─────┼────────")
+        
+        # Create a map of voice data for quick lookup
+        voice_map = {}
+        if 'voices' in response:
+            voice_map = {voice['id']: voice for voice in response['voices']}
+        
+        # If we have access to system_state, use it to show all voices
+        # Otherwise, show at least the voices in the response
+        if self.system_state and hasattr(self.system_state, 'voices'):
+            # Display all 48 voices using system state
+            for voice_id in range(1, 49):
+                voice_obj = self.system_state.voices[voice_id - 1]  # 0-indexed
+                
+                # Check if this voice was in the recent changes
+                changed_voice = voice_map.get(voice_id)
+                changed = ""
+                if changed_voice and (changed_voice.get('midi_changed') or changed_voice.get('volume_changed')):
+                    changed = "→"
+                
+                midi = voice_obj.midi_note if voice_obj.midi_note is not None else 0
+                volume = 1 if voice_obj.volume > 0 else 0
+                status = "🔊" if volume else "🔇"
+                
+                print(f"   {voice_id:2d}{changed:>1s}   │ {midi:3d}  │  {volume}  │ {status}")
+        else:
+            # Fallback: show voices from response + empty slots
+            for voice_id in range(1, 49):
+                if voice_id in voice_map:
+                    voice = voice_map[voice_id]
+                    midi = voice.get('midi_note', 0)
+                    volume = 1 if voice.get('volume', False) else 0
+                    status = "🔊" if volume else "🔇"
+                    
+                    # Highlight changed voices
+                    changed = ""
+                    if voice.get('midi_changed') or voice.get('volume_changed'):
+                        changed = "→"
+                    
+                    print(f"   {voice_id:2d}{changed:>1s}   │ {midi:3d}  │  {volume}  │ {status}")
+                else:
+                    # Voice not in response - show as inactive
+                    print(f"   {voice_id:2d}    │  --  │  0  │ 🔇")
+        
+        # Show summary
+        if self.system_state and hasattr(self.system_state, 'voices'):
+            active_voices = sum(1 for voice in self.system_state.voices if voice.volume > 0)
+        else:
+            active_voices = sum(1 for voice in voice_map.values() if voice.get('volume', False))
+        
+        print(f"   ──────┴──────┴─────┴────────")
+        print(f"   Active: {active_voices}/48 voices")
+        
+        # Show which voices changed in this update
+        if voice_map:
+            changed_list = [str(vid) for vid, voice in voice_map.items() 
+                          if voice.get('midi_changed') or voice.get('volume_changed')]
+            if changed_list:
+                print(f"   Changed: {', '.join(changed_list)}")
+        print()
 
