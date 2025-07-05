@@ -18,6 +18,7 @@ from typing import Callable, Optional, Dict, Any
 from pythonosc import osc_message_builder, osc_bundle_builder
 from pythonosc.osc_message import OscMessage
 from pythonosc.osc_packet import ParseError
+from pythonosc.udp_client import SimpleUDPClient
 import struct
 
 # Import FIBRIL components
@@ -97,6 +98,37 @@ def parse_osc_message(data: bytes) -> Optional[Dict[str, Any]]:
         return None
 
 
+def send_osc_messages_simple(client: SimpleUDPClient, response_data: Dict[str, Any]) -> int:
+    """Send OSC messages using SimpleUDPClient - much simpler and more reliable"""
+    message_count = 0
+    
+    try:
+        # Send individual voice parameter messages for changed voices
+        if 'voices' in response_data:
+            for voice in response_data['voices']:
+                voice_id = voice['id']
+                
+                # Send separate messages for MIDI note and volume if they changed
+                if voice.get('midi_changed', True):
+                    client.send_message(f"/voice_{voice_id}_MIDI", voice['midi_note'])
+                    message_count += 1
+                
+                if voice.get('volume_changed', True):
+                    client.send_message(f"/voice_{voice_id}_Volume", 1 if voice['volume'] else 0)
+                    message_count += 1
+        
+        # Send summary message if provided
+        if 'active_count' in response_data:
+            client.send_message("/active_count", response_data['active_count'])
+            message_count += 1
+            
+        return message_count
+        
+    except Exception as e:
+        logger.error(f"Error sending OSC messages: {e}")
+        return 0
+
+
 def build_osc_response(response_data: Dict[str, Any]) -> bytes:
     """Build OSC message for sending back to MaxMSP"""
     try:
@@ -146,6 +178,9 @@ class UDPHandler:
         self.send_socket = None
         self.system_state = system_state
         self.running = False
+        
+        # Create SimpleUDPClient for sending OSC messages
+        self.osc_client = SimpleUDPClient("127.0.0.1", send_port)
     
     async def start(self):
         """Start UDP listener and sender"""
@@ -153,11 +188,11 @@ class UDPHandler:
         self.listen_socket.bind(("127.0.0.1", self.listen_port))
         self.listen_socket.setblocking(False)
         
-        self.send_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        self.send_socket.setblocking(False)
+        # No need for send_socket anymore - SimpleUDPClient handles it
         
         self.running = True
         logger.info(f"UDP Handler listening on port {self.listen_port}, sending to {self.send_port}")
+        logger.info("Using SimpleUDPClient for OSC message sending")
         
         # Start the listening loop
         await self._listen_loop()
@@ -167,8 +202,7 @@ class UDPHandler:
         self.running = False
         if self.listen_socket:
             self.listen_socket.close()
-        if self.send_socket:
-            self.send_socket.close()
+        # No need to close send_socket anymore - SimpleUDPClient handles it
         logger.info("UDP Handler stopped")
     
     async def _listen_loop(self):
@@ -208,26 +242,14 @@ class UDPHandler:
                 break
     
     async def _send_response(self, response: Dict[Any, Any]):
-        """Send OSC response to MaxMSP"""
+        """Send OSC response to MaxMSP using SimpleUDPClient"""
         try:
-            messages = build_osc_response(response)
-            if messages:
-                loop = asyncio.get_event_loop()
-                
-                # Send each OSC message individually for better MaxMSP compatibility
-                total_bytes = 0
-                message_count = 0
-                for message_data in messages:
-                    if message_data:
-                        await loop.sock_sendto(self.send_socket, message_data, ("127.0.0.1", self.send_port))
-                        total_bytes += len(message_data)
-                        message_count += 1
-                        # Small delay between messages to prevent UDP flooding
-                        await asyncio.sleep(0.001)  # 1ms delay
-                
+            # Use the simple client for sending - much more reliable
+            message_count = send_osc_messages_simple(self.osc_client, response)
+            
+            if message_count > 0:
                 # Print detailed UDP message info
-                print(f"\n📤 SENDING {message_count} OSC MESSAGES TO MAXMSP (Port {self.send_port}):")
-                print(f"   Total data sent: {total_bytes} bytes")
+                print(f"\n📤 SENT {message_count} OSC MESSAGES TO MAXMSP (Port {self.send_port}):")
                 if 'voices' in response:
                     changed_voices = response['voices']
                     print(f"   Changed voices: {len(changed_voices)}")
@@ -248,7 +270,7 @@ class UDPHandler:
                 print("─" * 60)
                 print()  # Extra line break
                 
-                logger.debug(f"Sent {message_count} OSC messages: {total_bytes} bytes total")
+                logger.debug(f"Sent {message_count} OSC messages via SimpleUDPClient")
         except Exception as e:
             logger.error(f"Error sending OSC response: {e}")
 
