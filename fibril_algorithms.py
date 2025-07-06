@@ -167,8 +167,12 @@ class FibrilAlgorithm:
         self.rooted_notes_cache.clear()
         
         for rank in active_ranks:
-            root_midi = self._get_rank_root(rank, system_state.key_center)
-            fifth_midi = (root_midi + 7) % 12  # Perfect fifth
+            if rank.tonicization == 9:  # Subtonic rank - use 3rd and flat 7th of key center
+                root_midi = (system_state.key_center + 4) % 12  # Major 3rd of key center
+                fifth_midi = (system_state.key_center + 10) % 12  # Minor 7th (flat 7th) of key center
+            else:
+                root_midi = self._get_rank_root(rank, system_state.key_center)
+                fifth_midi = (root_midi + 7) % 12  # Perfect fifth
             
             # Check all octaves for root and fifth
             root_present = any((root_midi + oct * 12) in sustained_notes or 
@@ -192,9 +196,12 @@ class FibrilAlgorithm:
     
     def _get_rank_root(self, rank: Rank, key_center: int) -> int:
         """Get the root note (MIDI % 12) for a rank based on its tonicization"""
-        scale_degree_offsets = {1: 0, 2: 2, 3: 4, 4: 5, 5: 7, 6: 9, 7: 11, 8: 0}
-        offset = scale_degree_offsets.get(rank.tonicization, 0)
-        return (key_center + offset) % 12
+        if rank.tonicization == 9:  # Subtonic - return 3rd of key center
+            return (key_center + 4) % 12
+        else:
+            scale_degree_offsets = {1: 0, 2: 2, 3: 4, 4: 5, 5: 7, 6: 9, 7: 11, 8: 0}
+            offset = scale_degree_offsets.get(rank.tonicization, 0)
+            return (key_center + offset) % 12
     
     def _force_allocate_note(self, system_state: SystemState, midi_note_class: int, rank_priority: int):
         """Force allocation of a specific note class, choosing optimal octave"""

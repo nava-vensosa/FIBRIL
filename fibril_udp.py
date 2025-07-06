@@ -6,7 +6,7 @@ UDP communication for FIBRIL system:
 - Listens on port 1761 for MaxMSP OSC messages
 - Sends voice data to port 8998 
 - 18ms input buffer
-- Updates rank and voice objects from fibril-init.py
+- Updates rank and voice objects from fibril_init.py
 """
 
 import socket
@@ -344,6 +344,9 @@ class UDPHandler:
                     try:
                         message = parse_osc_message_for_fibril(data)
                         if message:
+                            # Print received message to terminal
+                            print(f"📥 RECEIVED OSC MESSAGE from {addr[0]}:{addr[1]}: {message}")
+                            
                             logger.debug(f"Received OSC message from {addr}: {message}")
                             
                             # Process message
@@ -353,9 +356,11 @@ class UDPHandler:
                             if response:
                                 self._send_response(response)
                         else:
+                            print(f"⚠️  COULD NOT PARSE OSC MESSAGE from {addr[0]}:{addr[1]}")
                             logger.debug(f"Could not parse OSC message from {addr}")
                             
                     except Exception as e:
+                        print(f"❌ ERROR PROCESSING OSC MESSAGE from {addr[0]}:{addr[1]}: {e}")
                         logger.error(f"Error processing OSC message: {e}")
                         logger.debug(f"Raw data: {data}")
                 
