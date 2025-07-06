@@ -119,17 +119,20 @@ class FibrilAlgorithm:
         # Step 2: SustainBypass - handle sustain pedal
         sustained_notes = self._handle_sustain(new_state)
         
-        # Step 3: Rooted Note Requirement - ensure root/fifth coverage
-        self._ensure_rooted_notes(new_state, active_ranks, sustained_notes)
-        
-        # Step 4: Calculate total voice budget
+        # Step 3: Calculate total voice budget FIRST (before allocation)
         total_density = sum(rank.density for rank in active_ranks)
         available_voices = min(48, total_density + len(sustained_notes))
         
-        # Step 5: Build global probability map
+        # Step 4: Clear excess voices if we have too many active
+        self._clear_excess_voices(new_state, available_voices, sustained_notes)
+        
+        # Step 5: Rooted Note Requirement - ensure root/fifth coverage
+        self._ensure_rooted_notes(new_state, active_ranks, sustained_notes)
+        
+        # Step 6: Build global probability map
         self._build_global_probability_map(new_state, active_ranks)
         
-        # Step 6: Allocate remaining voices
+        # Step 7: Allocate remaining voices
         self._allocate_remaining_voices(new_state, active_ranks, available_voices, sustained_notes)
         
         return new_state
@@ -168,8 +171,9 @@ class FibrilAlgorithm:
         
         for rank in active_ranks:
             if rank.tonicization == 9:  # Subtonic rank - use 3rd and flat 7th of key center
-                root_midi = (system_state.key_center + 4) % 12  # Major 3rd of key center
-                fifth_midi = (system_state.key_center + 10) % 12  # Minor 7th (flat 7th) of key center
+                key_center_pc = system_state.key_center % 12  # Get pitch class
+                root_midi = (key_center_pc + 4) % 12  # Major 3rd of key center
+                fifth_midi = (key_center_pc + 10) % 12  # Minor 7th (flat 7th) of key center
             else:
                 root_midi = self._get_rank_root(rank, system_state.key_center)
                 fifth_midi = (root_midi + 7) % 12  # Perfect fifth
@@ -196,12 +200,13 @@ class FibrilAlgorithm:
     
     def _get_rank_root(self, rank: Rank, key_center: int) -> int:
         """Get the root note (MIDI % 12) for a rank based on its tonicization"""
+        key_center_pc = key_center % 12  # Get pitch class from full MIDI value
         if rank.tonicization == 9:  # Subtonic - return 3rd of key center
-            return (key_center + 4) % 12
+            return (key_center_pc + 4) % 12
         else:
             scale_degree_offsets = {1: 0, 2: 2, 3: 4, 4: 5, 5: 7, 6: 9, 7: 11, 8: 0}
             offset = scale_degree_offsets.get(rank.tonicization, 0)
-            return (key_center + offset) % 12
+            return (key_center_pc + offset) % 12
     
     def _force_allocate_note(self, system_state: SystemState, midi_note_class: int, rank_priority: int):
         """Force allocation of a specific note class, choosing optimal octave"""
@@ -351,3 +356,27 @@ class FibrilAlgorithm:
                 return valid_indices[i]
         
         return valid_indices[-1] if valid_indices else None
+    
+    def _clear_excess_voices(self, system_state: SystemState, available_voices: int, sustained_notes: Set[int]):
+        """Clear excess voices when total density is lower than current active voices"""
+        # Count currently active voices (excluding sustained ones)
+        active_voices = []
+        for i, voice in enumerate(system_state.voices):
+            if voice.volume and voice.midi_note not in sustained_notes:
+                active_voices.append((i, voice.midi_note))
+        
+        current_non_sustained_count = len(active_voices)
+        max_non_sustained = available_voices - len(sustained_notes)
+        
+        if current_non_sustained_count > max_non_sustained:
+            # We have too many active voices - need to turn some off
+            excess_count = current_non_sustained_count - max_non_sustained
+            
+            # Sort by MIDI note (prefer to turn off higher notes first - LIFO style)
+            active_voices.sort(key=lambda x: x[1], reverse=True)
+            
+            # Turn off the excess voices
+            for i in range(excess_count):
+                voice_idx, midi_note = active_voices[i]
+                system_state.voices[voice_idx].volume = False
+                # logger.debug(f"Turning off excess voice {voice_idx} (MIDI {midi_note})")

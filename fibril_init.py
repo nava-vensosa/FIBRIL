@@ -62,7 +62,7 @@ class FibrilSystem:
         
         # Global system parameters
         self.sustain = 0
-        self.key_center = 0
+        self.key_center = 60  # Middle C (MIDI note 60)
     
     def get_rank(self, number: int):
         """Get rank by number (1-8)"""
@@ -99,7 +99,7 @@ class FibrilSystem:
         """Print current system state for debugging"""
         print("\n=== FIBRIL System State ===")
         print(f"Sustain: {self.sustain}")
-        print(f"Key Center: {self.key_center}")
+        print(f"Key Center: MIDI {self.key_center} (C4)")
         print("\nRanks:")
         for rank in self.ranks:
             print(f"  Rank {rank.number}: pos={rank.position}, "

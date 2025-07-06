@@ -47,7 +47,7 @@ class FibrilMain:
             ranks=self.fibril_system.ranks,
             voices=self.fibril_system.voices,
             sustain=False,
-            key_center=0  # C major
+            key_center=60  # Middle C (MIDI note 60)
         )
         
         # Initialize UDP handler for rank messages (port 1761)
@@ -204,12 +204,16 @@ class FibrilMain:
                 state_changed = True
         
         # Handle key center updates
-        elif message.get('address') == '/key_center':
-            old_key = self.system_state.key_center
-            self.system_state.key_center = int(message.get('value', 0)) % 12
-            if old_key != self.system_state.key_center:
-                logger.info(f"Key center changed to: {self.system_state.key_center}")
-                state_changed = True
+        elif message.get('address') == '/keyCenter' or message.get('type') == 'key_center':
+            # Get the value from either format
+            new_key_center = message.get('value') if message.get('type') == 'key_center' else message.get('value')
+            
+            if new_key_center is not None:
+                old_key = self.system_state.key_center
+                self.system_state.key_center = int(new_key_center)  # Full MIDI value, not modulo 12
+                if old_key != self.system_state.key_center:
+                    logger.info(f"Key center changed from MIDI {old_key} to MIDI {self.system_state.key_center}")
+                    state_changed = True
         
         # Legacy support for direct updates (for testing)
         if 'sustain' in message:
@@ -221,9 +225,9 @@ class FibrilMain:
         
         if 'key_center' in message:
             old_key = self.system_state.key_center
-            self.system_state.key_center = int(message['key_center']) % 12
+            self.system_state.key_center = int(message['key_center'])  # Full MIDI value
             if old_key != self.system_state.key_center:
-                logger.info(f"Key center changed to: {self.system_state.key_center}")
+                logger.info(f"Key center changed from MIDI {old_key} to MIDI {self.system_state.key_center}")
                 state_changed = True
         
         if 'ranks' in message:
@@ -369,15 +373,7 @@ class FibrilMain:
         print("FIBRIL SYSTEM STATE")
         print("=" * 80)
         
-        # Display ranks
-        print("\nRANKS:")
-        print("Number | Priority | Grey Code    | GCI | Density | Tonicization")
-        print("-------|----------|--------------|-----|---------|-------------")
-        for rank in self.system_state.ranks:
-            grey_str = f"[{','.join(map(str, rank.grey_code))}]"
-            print(f"  {rank.number:2d}   |    {rank.priority:2d}    | {grey_str:12s} | {rank.gci:3d} |   {rank.density:2d}    |      {rank.tonicization:2d}")
-        
-        # Display voices
+        # Display voices FIRST
         print("\nVOICES:")
         print("ID  | MIDI | Volume")
         print("----|------|-------")
@@ -385,11 +381,41 @@ class FibrilMain:
             volume_str = "ON " if voice.volume else "OFF"
             print(f"{voice.id:3d} | {voice.midi_note:4d} | {volume_str}")
         
-        # Display system parameters
+        # Display ranks SECOND
+        print("\nRANKS:")
+        print("Number | Priority | Grey Code    | GCI | Density | Tonicization")
+        print("-------|----------|--------------|-----|---------|-------------")
+        for rank in self.system_state.ranks:
+            grey_str = f"[{','.join(map(str, rank.grey_code))}]"
+            print(f"  {rank.number:2d}   |    {rank.priority:2d}    | {grey_str:12s} | {rank.gci:3d} |   {rank.density:2d}    |      {rank.tonicization:2d}")
+        
+        # Display active notes THIRD (sorted from lowest to highest)
+        active_notes = []
+        for voice in self.system_state.voices:
+            if voice.volume:
+                active_notes.append(voice.midi_note)
+        
+        active_notes.sort()  # Sort from lowest to highest
+        
+        print(f"\nACTIVE NOTES ({len(active_notes)}):")
+        if active_notes:
+            note_names = [self._midi_to_note_name(midi) for midi in active_notes]
+            print(" ".join(note_names))
+        else:
+            print("(none)")
+        
+        # Display system parameters FOURTH
         print(f"\nSYSTEM PARAMETERS:")
-        print(f"Key Center: {self.system_state.key_center}")
+        print(f"Key Center: MIDI {self.system_state.key_center} ({self._midi_to_note_name(self.system_state.key_center)})")
         print(f"Sustain: {'ON' if self.system_state.sustain else 'OFF'}")
         print("=" * 80)
+
+    def _midi_to_note_name(self, midi_note: int) -> str:
+        """Convert MIDI note to note name (e.g., 60 -> C4)"""
+        note_names = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B']
+        octave = midi_note // 12 - 1
+        note = note_names[midi_note % 12]
+        return f"{note}{octave}"
 
     def process_control_message(self, message: dict) -> Optional[dict]:
         """

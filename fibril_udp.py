@@ -211,7 +211,7 @@ def parse_osc_message_for_fibril(data: bytes) -> Optional[Dict[str, Any]]:
                     'type': 'sustain',
                     'value': args[0]
                 }
-        elif address == '/key_center':
+        elif address == '/keyCenter' or address == '/key_center':
             if args and isinstance(args[0], int):
                 message_dict = {
                     'type': 'key_center',

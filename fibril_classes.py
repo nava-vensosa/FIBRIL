@@ -72,15 +72,16 @@ class Rank:
         # These are intervals from the rank's tonic (in semitones)
         base_intervals = [0, 7, 4, 2, 5, 9, 11, 14, 17, 20, 6]  # 1, 5, 3, 2, 4, 6, 7, 9, 11, b13, #5
         
-        # Calculate the rank's tonic based on its tonicization and key center
-        rank_tonic = (key_center + self._get_scale_degree_offset(self.tonicization)) % 12
+        # Calculate the rank's tonic based on its tonicization and key center pitch class
+        key_center_pc = key_center % 12  # Get pitch class from full MIDI value
+        rank_tonic = (key_center_pc + self._get_scale_degree_offset(self.tonicization)) % 12
         
         valid_destinations = []
         
         if self.tonicization == 9:  # Subtonic (sharp 5th, whole tone scale)
-            destinations = self._fit_to_whole_tone_scale(rank_tonic, base_intervals, key_center)
+            destinations = self._fit_to_whole_tone_scale(rank_tonic, base_intervals, key_center_pc)
         else:  # All other ranks - use major scale
-            destinations = self._fit_to_major_scale(rank_tonic, base_intervals, key_center)
+            destinations = self._fit_to_major_scale(rank_tonic, base_intervals, key_center_pc)
         
         # Convert to all octaves (MIDI 0-127)
         for interval in destinations:
@@ -97,10 +98,10 @@ class Rank:
         offsets = {1: 0, 2: 2, 3: 4, 4: 5, 5: 7, 6: 9, 7: 11, 8: 0, 9: 6}
         return offsets.get(degree, 0)
     
-    def _fit_to_major_scale(self, rank_tonic: int, intervals: List[int], key_center: int) -> List[int]:
+    def _fit_to_major_scale(self, rank_tonic: int, intervals: List[int], key_center_pc: int) -> List[int]:
         """Fit harmonic intervals to major scale, adjusting out-of-key notes"""
         major_scale_offsets = [0, 2, 4, 5, 7, 9, 11]  # Major scale intervals
-        key_notes = [(key_center + offset) % 12 for offset in major_scale_offsets]
+        key_notes = [(key_center_pc + offset) % 12 for offset in major_scale_offsets]
         
         fitted_intervals = []
         for interval in intervals:
@@ -121,11 +122,11 @@ class Rank:
         
         return fitted_intervals
     
-    def _fit_to_whole_tone_scale(self, rank_tonic: int, intervals: List[int], key_center: int) -> List[int]:
+    def _fit_to_whole_tone_scale(self, rank_tonic: int, intervals: List[int], key_center_pc: int) -> List[int]:
         """Fit harmonic intervals to whole tone scale for subtonic rank"""
         # Whole tone scale: 0, 2, 4, 6, 8, 10
         whole_tone_offsets = [0, 2, 4, 6, 8, 10]
-        key_notes = [(key_center + offset) % 12 for offset in whole_tone_offsets]
+        key_notes = [(key_center_pc + offset) % 12 for offset in whole_tone_offsets]
         
         fitted_intervals = []
         for interval in intervals:
@@ -187,7 +188,7 @@ class Voice:
 class SystemState:
     """Global system state for FIBRIL algorithm"""
     sustain: bool = False
-    key_center: int = 0  # Key center offset
+    key_center: int = 60  # Key center MIDI note (default: middle C)
     
     # Layout modes
     right_hand_mode: str = "R->L"  # "R->L" or "Mirrored"
