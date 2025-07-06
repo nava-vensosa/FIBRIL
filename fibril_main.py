@@ -67,7 +67,7 @@ class FibrilMain:
         )
         
         # Buffer timing and state tracking
-        self.buffer_time = 0.080  # 80ms buffer as specified
+        self.buffer_time = 0.018  # 18ms buffer as specified
         self.last_state_hash = None
         self.pending_state_change = False
         self.last_buffer_time = 0
@@ -79,7 +79,7 @@ class FibrilMain:
         
         logger.info("FIBRIL system initialized successfully")
         logger.info(f"Listening on port {listen_port}, sending to port {send_port}")
-        logger.info(f"80ms buffer enabled for state processing")
+        logger.info(f"18ms buffer enabled for state processing")
         
         # Display initial system state
         self.display_system_state()
@@ -306,7 +306,7 @@ class FibrilMain:
             # Start UDP handler
             self.udp_handler.start()
             logger.info("FIBRIL system is running. Press Ctrl+C to stop.")
-            logger.info("80ms input buffer active for smooth state processing")
+            logger.info("18ms input buffer active for smooth state processing")
             
             # Keep running until interrupted
             while True:

@@ -29,8 +29,7 @@ from fibril_init import fibril_system
 # OSC imports
 try:
     from pythonosc.dispatcher import Dispatcher
-    from pythonosc.server import osc
-    from pythonosc.server import BlockingOSCUDPServer
+    from pythonosc.osc_server import BlockingOSCUDPServer
     OSC_AVAILABLE = True
 except ImportError:
     OSC_AVAILABLE = False
