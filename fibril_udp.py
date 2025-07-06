@@ -151,8 +151,40 @@ def parse_osc_message_for_fibril(data: bytes) -> Optional[Dict[str, Any]]:
         # Convert to FIBRIL message format
         message_dict = {'address': address}
         
-        # Handle rank messages like '/R3_0100'
-        if address.startswith('/R') and '_' in address:
+        # Handle rank priority messages like '/R1_priority', '/R2_priority', etc. (CHECK FIRST)
+        if address.startswith('/R') and address.endswith('_priority'):
+            rank_part = address[1:].split('_')[0]  # Remove '/' prefix, split on '_', take first part
+            if rank_part.startswith('R') and rank_part[1:].isdigit():
+                rank_number = int(rank_part[1:])
+                
+                # Get the priority value argument
+                if args and isinstance(args[0], int):
+                    priority = args[0]
+                    
+                    message_dict = {
+                        'type': 'rank_priority',
+                        'rank_number': rank_number,
+                        'priority': priority
+                    }
+        
+        # Handle rank tonicization messages like '/R1_tonicization', '/R2_tonicization', etc. (CHECK SECOND)
+        elif address.startswith('/R') and address.endswith('_tonicization'):
+            rank_part = address[1:].split('_')[0]  # Remove '/' prefix, split on '_', take first part
+            if rank_part.startswith('R') and rank_part[1:].isdigit():
+                rank_number = int(rank_part[1:])
+                
+                # Get the tonicization value argument
+                if args and isinstance(args[0], int):
+                    tonicization = args[0]
+                    
+                    message_dict = {
+                        'type': 'rank_tonicization',
+                        'rank_number': rank_number,
+                        'tonicization': tonicization
+                    }
+        
+        # Handle rank bit pattern messages like '/R3_0100' (CHECK LAST)
+        elif address.startswith('/R') and '_' in address:
             parts = address[1:].split('_')  # Remove leading '/', split on '_'
             if len(parts) == 2:
                 rank_part = parts[0]  # 'R3'
@@ -171,38 +203,6 @@ def parse_osc_message_for_fibril(data: bytes) -> Optional[Dict[str, Any]]:
                             'bit_pattern': bit_part,
                             'value': value
                         }
-        
-        # Handle rank priority messages like '/R1_priority', '/R2_priority', etc.
-        elif address.startswith('/R') and address.endswith('_priority'):
-            rank_part = address[1:-9]  # Remove '/R' prefix and '_priority' suffix
-            if rank_part.startswith('R') and rank_part[1:].isdigit():
-                rank_number = int(rank_part[1:])
-                
-                # Get the priority value argument
-                if args and isinstance(args[0], int):
-                    priority = args[0]
-                    
-                    message_dict = {
-                        'type': 'rank_priority',
-                        'rank_number': rank_number,
-                        'priority': priority
-                    }
-        
-        # Handle rank tonicization messages like '/R1_tonicization', '/R2_tonicization', etc.
-        elif address.startswith('/R') and address.endswith('_tonicization'):
-            rank_part = address[1:-13]  # Remove '/R' prefix and '_tonicization' suffix
-            if rank_part.startswith('R') and rank_part[1:].isdigit():
-                rank_number = int(rank_part[1:])
-                
-                # Get the tonicization value argument
-                if args and isinstance(args[0], int):
-                    tonicization = args[0]
-                    
-                    message_dict = {
-                        'type': 'rank_tonicization',
-                        'rank_number': rank_number,
-                        'tonicization': tonicization
-                    }
         
         # Handle other message types (sustain, key center, etc.)
         elif address == '/sustain':
