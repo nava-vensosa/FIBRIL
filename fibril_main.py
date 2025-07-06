@@ -216,7 +216,7 @@ class FibrilMain:
                         state_changed = True
         
         # Handle sustain pedal updates
-        elif message.get('address') == '/sustain':
+        elif message.get('address') == '/sustain' or message.get('type') == 'sustain':
             old_sustain = self.system_state.sustain
             self.system_state.sustain = bool(message.get('value', 0))
             if old_sustain != self.system_state.sustain:
