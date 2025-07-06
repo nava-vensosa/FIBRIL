@@ -142,7 +142,8 @@ class FibrilAlgorithm:
         # Step 7: Allocate remaining voices (avoid frozen voices)
         self._allocate_remaining_voices(new_state, active_ranks, available_voices, frozen_voice_ids)
         
-        return new_state
+        # Step 8: CRITICAL - Ensure no duplicate MIDI notes exist anywhere
+        self._ensure_no_duplicate_midi_notes(new_state)
         
         return new_state
     
@@ -168,17 +169,21 @@ class FibrilAlgorithm:
             system_state.frozen_voices.clear()
             frozen_count = 0
             frozen_midi_notes = set()  # Track MIDI notes to prevent duplicates
+            frozen_voice_ids = set()   # Track voice IDs to prevent duplicate voice entries
             
             for voice in system_state.voices:
-                if voice.volume:  # Voice is currently playing
-                    # Only freeze if we haven't already frozen this MIDI note
-                    if voice.midi_note not in frozen_midi_notes:
-                        system_state.frozen_voices.append((voice.id, voice.midi_note))
-                        frozen_midi_notes.add(voice.midi_note)
-                        frozen_count += 1
+                if voice.volume and voice.midi_note not in frozen_midi_notes and voice.id not in frozen_voice_ids:
+                    # Only freeze if we haven't already frozen this MIDI note or this voice ID
+                    system_state.frozen_voices.append((voice.id, voice.midi_note))
+                    frozen_midi_notes.add(voice.midi_note)
+                    frozen_voice_ids.add(voice.id)
                     voice.sustained = True
+                    frozen_count += 1
+                elif voice.volume:
+                    # Voice is active but either MIDI note or voice ID already frozen
+                    voice.sustained = True  # Still mark as sustained even if not added to frozen list
             
-            logger.info(f"Sustain pedal PRESSED: froze {frozen_count} unique voices")
+            logger.info(f"Sustain pedal PRESSED: froze {frozen_count} unique voices (no duplicates)")
             
         elif sustain_released:
             # SUSTAIN PEDAL RELEASED: Unfreeze all voices
@@ -194,15 +199,21 @@ class FibrilAlgorithm:
         # Update previous sustain state for next call
         system_state.previous_sustain = system_state.sustain
         
-        # Apply frozen voices to current voice state
+        # Apply frozen voices to current voice state, ensuring no duplicates
         frozen_voice_ids = set()
+        used_midi_notes = set()  # Track MIDI notes already assigned to prevent duplicates
+        
         for voice_id, midi_note in system_state.frozen_voices:
-            if voice_id < len(system_state.voices):
+            if voice_id < len(system_state.voices) and midi_note not in used_midi_notes:
                 voice = system_state.voices[voice_id]
                 voice.midi_note = midi_note
                 voice.volume = True
                 voice.sustained = True
                 frozen_voice_ids.add(voice_id)
+                used_midi_notes.add(midi_note)
+            elif midi_note in used_midi_notes:
+                # This MIDI note is already used by another voice - skip this duplicate
+                logger.warning(f"Skipping duplicate frozen MIDI note {midi_note} for voice {voice_id}")
         
         # Return set of frozen voice IDs (not MIDI notes) for allocation algorithm
         return frozen_voice_ids
@@ -258,6 +269,20 @@ class FibrilAlgorithm:
         # Find an available voice or steal the lowest priority one (avoid frozen voices)
         target_voice_idx = self._find_or_steal_voice(system_state, target_midi, frozen_voice_ids)
         if target_voice_idx is not None:
+            # Check if this MIDI note is already being used by another voice
+            existing_voice_with_midi = None
+            for voice in system_state.voices:
+                if voice.volume and voice.midi_note == target_midi and voice.id != target_voice_idx:
+                    existing_voice_with_midi = voice
+                    break
+            
+            if existing_voice_with_midi:
+                # Another voice already has this MIDI note - turn it off first
+                existing_voice_with_midi.volume = False
+                existing_voice_with_midi.sustained = False
+                logger.debug(f"Removed duplicate MIDI {target_midi} from voice {existing_voice_with_midi.id} before assigning to voice {target_voice_idx}")
+            
+            # Now safely assign the MIDI note
             system_state.voices[target_voice_idx].midi_note = target_midi
             system_state.voices[target_voice_idx].volume = True
             
@@ -420,6 +445,7 @@ class FibrilAlgorithm:
                         # Clear sustained flag if sustain is not active
                         system_state.voices[voice_idx].sustained = False
                     
+                    # Update forbidden notes to prevent future duplicates in this allocation cycle
                     forbidden_notes.add(selected_midi)
     
     def _sample_from_probability_map(self, forbidden_notes: Set[int]) -> int:
@@ -474,3 +500,41 @@ class FibrilAlgorithm:
                 system_state.voices[voice_idx].volume = False
                 system_state.voices[voice_idx].sustained = False
                 logger.debug(f"Turning off excess voice {voice_idx} (MIDI {midi_note})")
+    
+    def _ensure_no_duplicate_midi_notes(self, system_state: SystemState):
+        """Ensure no two voices have the same MIDI note - critical for system integrity"""
+        midi_note_to_voice = {}
+        duplicates_found = []
+        
+        for voice in system_state.voices:
+            if voice.volume:  # Only check active voices
+                if voice.midi_note in midi_note_to_voice:
+                    # Duplicate found!
+                    existing_voice = midi_note_to_voice[voice.midi_note]
+                    duplicates_found.append((voice.midi_note, existing_voice.id, voice.id))
+                    
+                    # Keep the voice with higher priority (lower ID typically = higher priority)
+                    if voice.id > existing_voice.id:
+                        # Turn off the current (lower priority) voice
+                        voice.volume = False
+                        voice.sustained = False
+                        logger.warning(f"Removed duplicate MIDI {voice.midi_note} from voice {voice.id} (kept voice {existing_voice.id})")
+                    else:
+                        # Turn off the existing (lower priority) voice
+                        existing_voice.volume = False
+                        existing_voice.sustained = False
+                        midi_note_to_voice[voice.midi_note] = voice  # Update the mapping
+                        logger.warning(f"Removed duplicate MIDI {voice.midi_note} from voice {existing_voice.id} (kept voice {voice.id})")
+                else:
+                    midi_note_to_voice[voice.midi_note] = voice
+        
+        if duplicates_found:
+            logger.error(f"Found and resolved {len(duplicates_found)} duplicate MIDI notes: {duplicates_found}")
+            
+            # Clean up frozen_voices to remove any references to deactivated voices
+            system_state.frozen_voices = [
+                (voice_id, midi_note) for voice_id, midi_note in system_state.frozen_voices
+                if voice_id < len(system_state.voices) and system_state.voices[voice_id].volume
+            ]
+        
+        return len(duplicates_found) == 0  # Return True if no duplicates found
