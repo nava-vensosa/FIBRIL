@@ -260,7 +260,17 @@ class FibrilAlgorithm:
         return worst_voice_idx
     
     def _build_global_probability_map(self, system_state: SystemState, active_ranks: List[Rank]):
-        """Build the global probability map by overlaying all rank probability curves"""
+        """
+        Build the global probability map by overlaying all rank probability curves
+        
+        Applies octave separation heuristic:
+        - Octave number = (rank.priority + 7) / 2
+        - Center MIDI = key_center + (octave_number - 4) * 12
+        - Priority 1 → octave 4 (at key center)
+        - Priority 2 → octave 4.5 (half octave above key center)
+        - Priority 8 → octave 7.5 (3.5 octaves above key center)
+        - This prevents all ranks from clustering in the same octave
+        """
         self.global_probability_map = [0.0] * 128
         
         # Get currently active notes for voice leading
@@ -286,11 +296,18 @@ class FibrilAlgorithm:
                 rank_curve = [a * b for a, b in zip(rank_curve, voice_leading_curve)]
             
             # Apply octave/priority bias using Gaussian curve
-            priority_bias_center = 60 + (8 - rank.priority) * 6  # Higher priority = lower center
+            # Formula: (priority + 7) / 2 gives octave number relative to key center
+            # Priority 1 → octave 4, Priority 2 → octave 4.5, Priority 3 → octave 5, etc.
+            octave_number = (rank.priority + 7) / 2
+            octave_center_midi = system_state.key_center + (octave_number - 4) * 12  # Relative to key center at octave 4
             octave_bias_curve = ProbabilityCurve.gaussian(
-                priority_bias_center, width=24  # 2 octave spread
+                octave_center_midi, width=18  # 1.5 octave spread
             )
             rank_curve = [a * b for a, b in zip(rank_curve, octave_bias_curve)]
+            
+            # Debug log for octave separation
+            octave_display = f"{octave_number:.1f}" if octave_number != int(octave_number) else str(int(octave_number))
+            print(f"Rank {rank.number} (priority {rank.priority}): octave {octave_display} relative to key center = MIDI {octave_center_midi:.1f}")
             
             # Weight by rank priority and add to global map
             rank_weight = (9 - rank.priority) / 8.0  # Higher priority = higher weight

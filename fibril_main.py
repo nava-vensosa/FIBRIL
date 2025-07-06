@@ -22,6 +22,14 @@ from fibril_udp import UDPHandler
 from fibril_algorithms import FibrilAlgorithm
 from fibril_classes import SystemState
 
+# OSC client for sending to visualizer
+try:
+    from pythonosc.udp_client import SimpleUDPClient
+    OSC_CLIENT_AVAILABLE = True
+except ImportError:
+    OSC_CLIENT_AVAILABLE = False
+    print("Warning: python-osc not available for visualizer updates")
+
 # Configure logging
 logging.basicConfig(
     level=logging.INFO,
@@ -33,9 +41,21 @@ logger = logging.getLogger(__name__)
 class FibrilMain:
     """Main FIBRIL system orchestrator"""
     
-    def __init__(self, listen_port: int = 1761, send_port: int = 8998):
+    def __init__(self, listen_port: int = 1761, send_port: int = 8998, visualizer_port: int = 1763):
         self.listen_port = listen_port
         self.send_port = send_port
+        self.visualizer_port = visualizer_port
+        
+        # Initialize OSC client for visualizer updates
+        if OSC_CLIENT_AVAILABLE:
+            try:
+                self.visualizer_client = SimpleUDPClient("127.0.0.1", visualizer_port)
+                logger.info(f"OSC client initialized for visualizer on port {visualizer_port}")
+            except Exception as e:
+                logger.warning(f"Could not initialize visualizer OSC client: {e}")
+                self.visualizer_client = None
+        else:
+            self.visualizer_client = None
         
         # Initialize system components
         logger.info("Initializing FIBRIL system...")
@@ -360,6 +380,9 @@ class FibrilMain:
             # Display updated system state
             self.display_system_state()
             
+            # Send updated state to visualizer
+            self._send_state_to_visualizer()
+            
             return response
             
         except Exception as e:
@@ -484,6 +507,39 @@ class FibrilMain:
                 state_changed = True
         
         return state_changed
+
+    def _send_state_to_visualizer(self):
+        """Send current system state to the real-time visualizer"""
+        if not self.visualizer_client:
+            return
+            
+        try:
+            # Send key center update
+            self.visualizer_client.send_message("/keyCenter", self.system_state.key_center)
+            
+            # Send sustain update
+            self.visualizer_client.send_message("/sustain", 1 if self.system_state.sustain else 0)
+            
+            # Send rank updates
+            for rank in self.system_state.ranks:
+                rank_num = rank.number
+                
+                # Send priority update
+                self.visualizer_client.send_message(f"/R{rank_num}_priority", rank.priority)
+                
+                # Send tonicization update
+                self.visualizer_client.send_message(f"/R{rank_num}_tonicization", rank.tonicization)
+                
+                # Send grey code updates for each bit
+                grey_patterns = ['1000', '0100', '0010', '0001']
+                for i, pattern in enumerate(grey_patterns):
+                    bit_value = rank.grey_code[i]
+                    self.visualizer_client.send_message(f"/R{rank_num}_{pattern}", bit_value)
+            
+            logger.debug("System state sent to visualizer")
+            
+        except Exception as e:
+            logger.warning(f"Could not send state to visualizer: {e}")
 
 def main():
     """Command line entry point"""
