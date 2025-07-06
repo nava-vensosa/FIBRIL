@@ -167,15 +167,18 @@ class FibrilAlgorithm:
             # SUSTAIN PEDAL PRESSED: Snapshot and freeze all currently active voices
             system_state.frozen_voices.clear()
             frozen_count = 0
+            frozen_midi_notes = set()  # Track MIDI notes to prevent duplicates
             
             for voice in system_state.voices:
                 if voice.volume:  # Voice is currently playing
-                    # Freeze this voice - it will stay ON until sustain is released
-                    system_state.frozen_voices.append((voice.id, voice.midi_note))
+                    # Only freeze if we haven't already frozen this MIDI note
+                    if voice.midi_note not in frozen_midi_notes:
+                        system_state.frozen_voices.append((voice.id, voice.midi_note))
+                        frozen_midi_notes.add(voice.midi_note)
+                        frozen_count += 1
                     voice.sustained = True
-                    frozen_count += 1
             
-            logger.info(f"Sustain pedal PRESSED: froze {frozen_count} voices")
+            logger.info(f"Sustain pedal PRESSED: froze {frozen_count} unique voices")
             
         elif sustain_released:
             # SUSTAIN PEDAL RELEASED: Unfreeze all voices
@@ -257,8 +260,20 @@ class FibrilAlgorithm:
         if target_voice_idx is not None:
             system_state.voices[target_voice_idx].midi_note = target_midi
             system_state.voices[target_voice_idx].volume = True
-            # Clear sustained flag if we're reassigning a voice (shouldn't happen with frozen voices)
-            system_state.voices[target_voice_idx].sustained = False
+            
+            # If sustain pedal is currently held, immediately freeze this new voice
+            if system_state.sustain:
+                # Check if this MIDI note is not already frozen to prevent duplicates
+                frozen_midi_notes = {midi_note for _, midi_note in system_state.frozen_voices}
+                if target_midi not in frozen_midi_notes:
+                    system_state.frozen_voices.append((target_voice_idx, target_midi))
+                    system_state.voices[target_voice_idx].sustained = True
+                else:
+                    # Note already frozen, just mark this voice as sustained
+                    system_state.voices[target_voice_idx].sustained = True
+            else:
+                # Clear sustained flag if sustain is not active
+                system_state.voices[target_voice_idx].sustained = False
     
     def _choose_optimal_octave(self, system_state: SystemState, midi_note_class: int, rank_priority: int) -> int:
         """Choose optimal octave for a note based on priority and current voicing"""
@@ -390,8 +405,21 @@ class FibrilAlgorithm:
                 if voice_idx is not None:
                     system_state.voices[voice_idx].midi_note = selected_midi
                     system_state.voices[voice_idx].volume = True
-                    # Clear sustained flag if we're reassigning a voice
-                    system_state.voices[voice_idx].sustained = False
+                    
+                    # If sustain pedal is currently held, immediately freeze this new voice
+                    if system_state.sustain:
+                        # Check if this MIDI note is not already frozen to prevent duplicates
+                        frozen_midi_notes = {midi_note for _, midi_note in system_state.frozen_voices}
+                        if selected_midi not in frozen_midi_notes:
+                            system_state.frozen_voices.append((voice_idx, selected_midi))
+                            system_state.voices[voice_idx].sustained = True
+                        else:
+                            # Note already frozen, just mark this voice as sustained
+                            system_state.voices[voice_idx].sustained = True
+                    else:
+                        # Clear sustained flag if sustain is not active
+                        system_state.voices[voice_idx].sustained = False
+                    
                     forbidden_notes.add(selected_midi)
     
     def _sample_from_probability_map(self, forbidden_notes: Set[int]) -> int:
