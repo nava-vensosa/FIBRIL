@@ -178,10 +178,11 @@ class Rank:
 
 @dataclass
 class Voice:
-    """Voice with MIDI note and volume"""
+    """Voice with MIDI note, volume, and sustain state"""
     midi_note: int
     volume: bool
     id: int
+    sustained: bool = False  # Whether this voice is being sustained by pedal
 
 
 @dataclass

@@ -8,8 +8,12 @@ state transition system with probability curve overlays.
 
 import math
 import random
+import logging
 from typing import List, Dict, Tuple, Set
 from fibril_classes import Rank, Voice, SystemState
+
+# Configure logger
+logger = logging.getLogger(__name__)
 
 
 class ProbabilityCurve:
@@ -142,26 +146,38 @@ class FibrilAlgorithm:
         return [rank for rank in system_state.ranks if rank.density > 0]
     
     def _handle_sustain(self, system_state: SystemState) -> Set[int]:
-        """Handle sustain pedal logic and return set of sustained MIDI notes"""
+        """
+        Handle sustain pedal logic and return set of sustained MIDI notes
+        
+        Sustain pedal behavior:
+        - When sustain is ON: preserve all currently active voices
+        - When sustain is OFF: allow normal voice allocation
+        - Sustained notes are protected from being reassigned
+        - New allocation happens in addition to sustained notes
+        """
         sustained_notes = set()
         
         if system_state.sustain:
-            # Collect currently active notes
-            active_notes = []
-            for i, voice in enumerate(system_state.voices):
+            # Sustain pedal is ON - preserve all currently active voices
+            sustained_count = 0
+            for voice in system_state.voices:
                 if voice.volume:
-                    active_notes.append((voice.midi_note, i))
+                    sustained_notes.add(voice.midi_note)
+                    voice.sustained = True
+                    sustained_count += 1
             
-            # If we have more than 48 voices, release the lowest MIDI notes (FIFO)
-            if len(active_notes) > 48:
-                active_notes.sort(key=lambda x: x[0])  # Sort by MIDI note
-                to_release = active_notes[:-48]  # Keep only the highest 48
-                for midi_note, voice_idx in to_release:
-                    system_state.voices[voice_idx].volume = False
-                active_notes = active_notes[-48:]
+            if sustained_count > 0:
+                logger.debug(f"Sustain ON: protecting {sustained_count} voices")
+        else:
+            # Sustain pedal is OFF - clear sustain flags and allow all voices to be reallocated
+            sustained_count = 0
+            for voice in system_state.voices:
+                if hasattr(voice, 'sustained') and voice.sustained:
+                    sustained_count += 1
+                voice.sustained = False
             
-            # Mark remaining notes as sustained
-            sustained_notes = {midi_note for midi_note, _ in active_notes}
+            if sustained_count > 0:
+                logger.debug(f"Sustain OFF: releasing {sustained_count} sustained voices")
         
         return sustained_notes
     
@@ -219,6 +235,9 @@ class FibrilAlgorithm:
         if target_voice_idx is not None:
             system_state.voices[target_voice_idx].midi_note = target_midi
             system_state.voices[target_voice_idx].volume = True
+            # Clear sustained flag if we're reassigning a voice
+            if hasattr(system_state.voices[target_voice_idx], 'sustained'):
+                system_state.voices[target_voice_idx].sustained = False
     
     def _choose_optimal_octave(self, system_state: SystemState, midi_note_class: int, rank_priority: int) -> int:
         """Choose optimal octave for a note based on priority and current voicing"""
@@ -238,22 +257,33 @@ class FibrilAlgorithm:
         
         return base_octave
     
-    def _find_or_steal_voice(self, system_state: SystemState, target_midi: int) -> int:
-        """Find available voice or steal lowest priority voice"""
+    def _find_or_steal_voice(self, system_state: SystemState, target_midi: int, protected_voices: Set[int] = None) -> int:
+        """Find available voice or steal lowest priority voice, respecting sustained voices"""
+        if protected_voices is None:
+            protected_voices = set()
+        
         # First, try to find an empty voice
         for i, voice in enumerate(system_state.voices):
             if not voice.volume:
                 return i
         
         # If no empty voices, steal from the voice with the least desirable note
-        # (prefer to steal from higher MIDI notes for lower priority ranks)
-        worst_voice_idx = 0
+        # BUT NEVER steal from sustained voices
+        worst_voice_idx = None
         worst_score = -1
         
         for i, voice in enumerate(system_state.voices):
+            # Skip sustained voices - they are protected
+            if hasattr(voice, 'sustained') and voice.sustained:
+                continue
+            
+            # Skip voices in protected set
+            if i in protected_voices:
+                continue
+            
             # Simple scoring: prefer to replace higher notes
             score = voice.midi_note
-            if score > worst_score:
+            if worst_voice_idx is None or score > worst_score:
                 worst_score = score
                 worst_voice_idx = i
         
@@ -343,6 +373,9 @@ class FibrilAlgorithm:
                 if voice_idx is not None:
                     system_state.voices[voice_idx].midi_note = selected_midi
                     system_state.voices[voice_idx].volume = True
+                    # Clear sustained flag if we're reassigning a voice
+                    if hasattr(system_state.voices[voice_idx], 'sustained'):
+                        system_state.voices[voice_idx].sustained = False
                     forbidden_notes.add(selected_midi)
     
     def _sample_from_probability_map(self, forbidden_notes: Set[int]) -> int:
@@ -380,6 +413,9 @@ class FibrilAlgorithm:
         active_voices = []
         for i, voice in enumerate(system_state.voices):
             if voice.volume and voice.midi_note not in sustained_notes:
+                # Also check for sustained flag on the voice itself
+                if hasattr(voice, 'sustained') and voice.sustained:
+                    continue  # Skip sustained voices
                 active_voices.append((i, voice.midi_note))
         
         current_non_sustained_count = len(active_voices)
@@ -396,4 +432,7 @@ class FibrilAlgorithm:
             for i in range(excess_count):
                 voice_idx, midi_note = active_voices[i]
                 system_state.voices[voice_idx].volume = False
+                # Clear sustained flag when turning off voice
+                if hasattr(system_state.voices[voice_idx], 'sustained'):
+                    system_state.voices[voice_idx].sustained = False
                 # logger.debug(f"Turning off excess voice {voice_idx} (MIDI {midi_note})")
