@@ -21,19 +21,24 @@ class FibrilSystem:
     """Container for all FIBRIL system objects"""
     
     def __init__(self):
-        # Updated tonicization mapping per user request:
-        # R1: tonic, R2: supertonic, R3: mediant, R4: subdominant,
-        # R5: dominant, R6: submediant, R7: leading tone, R8: subtonic
-        default_tonicizations = [1, 2, 3, 4, 5, 6, 7, 8]
-        
         # Initialize 8 ranks with default values
+        # Ranks 1-7: priority = tonicization = rank number
+        # Rank 8: priority = 8, tonicization = 9 (subtonic/sharp 5th)
         self.ranks = []
         for i in range(8):
+            rank_number = i + 1
+            if rank_number == 8:
+                # Special case: Rank 8 uses tonicization 9 (subtonic/whole tone)
+                tonicization = 9
+            else:
+                # Normal case: tonicization matches rank number
+                tonicization = rank_number
+                
             rank = Rank(
-                number=i + 1,           # Rank number 1-8
-                position=i + 1,         # Initial position 1-8 
+                number=rank_number,     # Rank number 1-8 (fixed)
+                priority=rank_number,   # Initial priority 1-8 (can be changed by MaxMSP)
                 grey_code=[0, 0, 0, 0], # Default grey code
-                tonicization=default_tonicizations[i]  # Default scale degree
+                tonicization=tonicization  # 1-8 for ranks 1-7, 9 for rank 8 (can be changed by MaxMSP)
             )
             self.ranks.append(rank)
         

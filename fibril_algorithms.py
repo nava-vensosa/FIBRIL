@@ -183,11 +183,11 @@ class FibrilAlgorithm:
             
             # Force allocation of missing root/fifth
             if not root_present:
-                self._force_allocate_note(system_state, root_midi, rank.position)
+                self._force_allocate_note(system_state, root_midi, rank.priority)
                 self.rooted_notes_cache.add(root_midi)
             
             if not fifth_present:
-                self._force_allocate_note(system_state, fifth_midi, rank.position)
+                self._force_allocate_note(system_state, fifth_midi, rank.priority)
                 self.rooted_notes_cache.add(fifth_midi)
     
     def _get_rank_root(self, rank: Rank, key_center: int) -> int:
@@ -274,14 +274,14 @@ class FibrilAlgorithm:
                 rank_curve = [a * b for a, b in zip(rank_curve, voice_leading_curve)]
             
             # Apply octave/priority bias using Gaussian curve
-            priority_bias_center = 60 + (8 - rank.position) * 6  # Higher priority = lower center
+            priority_bias_center = 60 + (8 - rank.priority) * 6  # Higher priority = lower center
             octave_bias_curve = ProbabilityCurve.gaussian(
                 priority_bias_center, width=24  # 2 octave spread
             )
             rank_curve = [a * b for a, b in zip(rank_curve, octave_bias_curve)]
             
             # Weight by rank priority and add to global map
-            rank_weight = (9 - rank.position) / 8.0  # Higher priority = higher weight
+            rank_weight = (9 - rank.priority) / 8.0  # Higher priority = higher weight
             for i in range(128):
                 self.global_probability_map[i] += rank_curve[i] * rank_weight
         

@@ -50,7 +50,7 @@ class FibrilMain:
             key_center=0  # C major
         )
         
-        # Initialize UDP handler
+        # Initialize UDP handler for rank messages (port 1761)
         self.udp_handler = UDPHandler(
             message_processor=self.process_message,
             listen_port=listen_port,
@@ -58,8 +58,16 @@ class FibrilMain:
             system_state=self.system_state
         )
         
+        # Initialize second UDP handler for sustain/keyCenter messages (port 1762)
+        self.control_udp_handler = UDPHandler(
+            message_processor=self.process_control_message,
+            listen_port=1762,
+            send_port=send_port,
+            system_state=self.system_state
+        )
+        
         # Buffer timing and state tracking
-        self.buffer_time = 0.220  # 220ms buffer as specified in README
+        self.buffer_time = 0.180  # 180ms buffer as specified
         self.last_state_hash = None
         self.pending_state_change = False
         self.last_buffer_time = 0
@@ -71,7 +79,7 @@ class FibrilMain:
         
         logger.info("FIBRIL system initialized successfully")
         logger.info(f"Listening on port {listen_port}, sending to port {send_port}")
-        logger.info(f"220ms buffer enabled for state processing")
+        logger.info(f"180ms buffer enabled for state processing")
         
         # Display initial system state
         self.display_system_state()
@@ -157,19 +165,34 @@ class FibrilMain:
                                       f"grey_code={rank.grey_code}")
                             state_changed = True
         
-        # Handle rank position updates from OSC messages like '/R1_pos', '/R2_pos', etc.
-        elif message.get('type') == 'rank_position':
+        # Handle rank priority updates from OSC messages like '/R1_priority', '/R2_priority', etc.
+        elif message.get('type') == 'rank_priority':
             rank_number = message.get('rank_number')
-            position = message.get('position')
+            priority = message.get('priority')
             
-            if rank_number and position is not None:
+            if rank_number and priority is not None:
                 if 1 <= rank_number <= 8:
                     rank = self.system_state.ranks[rank_number - 1]
-                    old_position = rank.position
-                    rank.position = int(position)
+                    old_priority = rank.priority
+                    rank.priority = int(priority)
                     
-                    if old_position != rank.position:
-                        logger.info(f"Rank {rank_number} position updated: {old_position} -> {rank.position}")
+                    if old_priority != rank.priority:
+                        logger.info(f"Rank {rank_number} priority updated: {old_priority} -> {rank.priority}")
+                        state_changed = True
+        
+        # Handle rank tonicization updates from OSC messages like '/R1_tonicization', '/R2_tonicization', etc.
+        elif message.get('type') == 'rank_tonicization':
+            rank_number = message.get('rank_number')
+            tonicization = message.get('tonicization')
+            
+            if rank_number and tonicization is not None:
+                if 1 <= rank_number <= 8:
+                    rank = self.system_state.ranks[rank_number - 1]
+                    old_tonicization = rank.tonicization
+                    rank.tonicization = int(tonicization)
+                    
+                    if old_tonicization != rank.tonicization:
+                        logger.info(f"Rank {rank_number} tonicization updated: {old_tonicization} -> {rank.tonicization}")
                         state_changed = True
         
         # Handle sustain pedal updates
@@ -279,7 +302,7 @@ class FibrilMain:
             # Start UDP handler
             self.udp_handler.start()
             logger.info("FIBRIL system is running. Press Ctrl+C to stop.")
-            logger.info("220ms input buffer active for smooth state processing")
+            logger.info("180ms input buffer active for smooth state processing")
             
             # Keep running until interrupted
             while True:
@@ -348,11 +371,11 @@ class FibrilMain:
         
         # Display ranks
         print("\nRANKS:")
-        print("Number | Position | Grey Code    | GCI | Density")
-        print("-------|----------|--------------|-----|--------")
+        print("Number | Priority | Grey Code    | GCI | Density | Tonicization")
+        print("-------|----------|--------------|-----|---------|-------------")
         for rank in self.system_state.ranks:
             grey_str = f"[{','.join(map(str, rank.grey_code))}]"
-            print(f"  {rank.number:2d}   |    {rank.position:2d}    | {grey_str:12s} | {rank.gci:3d} |   {rank.density:2d}")
+            print(f"  {rank.number:2d}   |    {rank.priority:2d}    | {grey_str:12s} | {rank.gci:3d} |   {rank.density:2d}    |      {rank.tonicization:2d}")
         
         # Display voices
         print("\nVOICES:")
@@ -367,6 +390,74 @@ class FibrilMain:
         print(f"Key Center: {self.system_state.key_center}")
         print(f"Sustain: {'ON' if self.system_state.sustain else 'OFF'}")
         print("=" * 80)
+
+    def process_control_message(self, message: dict) -> Optional[dict]:
+        """
+        Process incoming control messages (sustain, keyCenter) from port 1762
+        
+        Args:
+            message: Parsed OSC message containing sustain or keyCenter updates
+            
+        Returns:
+            dict: Response message with voice allocations, or None if no change
+        """
+        try:
+            # Update system state based on control message
+            state_changed = self._update_control_state(message)
+            
+            if not state_changed:
+                return None
+            
+            # Mark that we have a pending state change
+            self.state_change_pending = True
+            
+            # Check if we should process immediately (buffer time has passed)
+            current_time = time.time()
+            time_since_last_buffer = current_time - self.last_buffer_time
+            
+            if time_since_last_buffer >= self.buffer_time:
+                logger.debug("Buffer time exceeded, processing control change immediately")
+                return self._process_buffered_state_change()
+            else:
+                # Schedule buffer processing if not already scheduled
+                if self.buffer_task is None or not self.buffer_task.is_alive():
+                    remaining_time = self.buffer_time - time_since_last_buffer
+                    self.buffer_task = threading.Timer(remaining_time, self._delayed_buffer_processing)
+                    self.buffer_task.start()
+                    logger.debug(f"Control change buffered, will process in {remaining_time:.3f}s")
+                
+                return None  # Don't send response yet, wait for buffer
+                
+        except Exception as e:
+            logger.error(f"Error processing control message: {e}")
+            return None
+    
+    def _update_control_state(self, message: dict) -> bool:
+        """
+        Update system state based on incoming control OSC message (sustain, keyCenter)
+        
+        Returns:
+            bool: True if state changed, False otherwise
+        """
+        state_changed = False
+        
+        # Handle sustain pedal updates
+        if message.get('address') == '/sustain':
+            old_sustain = self.system_state.sustain
+            self.system_state.sustain = bool(message.get('value', 0))
+            if old_sustain != self.system_state.sustain:
+                logger.info(f"Sustain pedal: {'ON' if self.system_state.sustain else 'OFF'}")
+                state_changed = True
+        
+        # Handle key center updates - note the different case
+        elif message.get('address') == '/keyCenter':
+            old_key = self.system_state.key_center
+            self.system_state.key_center = int(message.get('value', 0)) % 12
+            if old_key != self.system_state.key_center:
+                logger.info(f"Key center changed to: {self.system_state.key_center}")
+                state_changed = True
+        
+        return state_changed
 
 def main():
     """Command line entry point"""

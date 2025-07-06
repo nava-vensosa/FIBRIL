@@ -172,20 +172,36 @@ def parse_osc_message_for_fibril(data: bytes) -> Optional[Dict[str, Any]]:
                             'value': value
                         }
         
-        # Handle rank position messages like '/R1_pos', '/R2_pos', etc.
-        elif address.startswith('/R') and address.endswith('_pos'):
-            rank_part = address[1:-4]  # Remove '/R' prefix and '_pos' suffix
+        # Handle rank priority messages like '/R1_priority', '/R2_priority', etc.
+        elif address.startswith('/R') and address.endswith('_priority'):
+            rank_part = address[1:-9]  # Remove '/R' prefix and '_priority' suffix
             if rank_part.startswith('R') and rank_part[1:].isdigit():
                 rank_number = int(rank_part[1:])
                 
-                # Get the position value argument
+                # Get the priority value argument
                 if args and isinstance(args[0], int):
-                    position = args[0]
+                    priority = args[0]
                     
                     message_dict = {
-                        'type': 'rank_position',
+                        'type': 'rank_priority',
                         'rank_number': rank_number,
-                        'position': position
+                        'priority': priority
+                    }
+        
+        # Handle rank tonicization messages like '/R1_tonicization', '/R2_tonicization', etc.
+        elif address.startswith('/R') and address.endswith('_tonicization'):
+            rank_part = address[1:-13]  # Remove '/R' prefix and '_tonicization' suffix
+            if rank_part.startswith('R') and rank_part[1:].isdigit():
+                rank_number = int(rank_part[1:])
+                
+                # Get the tonicization value argument
+                if args and isinstance(args[0], int):
+                    tonicization = args[0]
+                    
+                    message_dict = {
+                        'type': 'rank_tonicization',
+                        'rank_number': rank_number,
+                        'tonicization': tonicization
                     }
         
         # Handle other message types (sustain, key center, etc.)
@@ -357,32 +373,13 @@ class UDPHandler:
             message_count = send_osc_messages_simple(self.osc_client, response)
             
             if message_count > 0:
-                # Print detailed UDP message info
-                print(f"\n📤 SENT {message_count} OSC MESSAGES TO MAXMSP (Port {self.send_port}):")
-                print(f"   Target: 127.0.0.1:{self.send_port}")
+                # Print brief UDP message info
+                print(f"📤 SENT {message_count} OSC MESSAGES TO MAXMSP (Port {self.send_port})")
                 
-                # Show active voice display
-                self._print_voice_status(response)
-                
-                if 'voices' in response:
-                    changed_voices = response['voices']
-                    print(f"   Changed voices: {len(changed_voices)}")
-                    for voice in changed_voices[:5]:  # Show first 5 changed voices
-                        changes = []
-                        if voice.get('midi_changed'):
-                            changes.append(f"MIDI: {voice['midi_note']}")
-                        if voice.get('volume_changed'):
-                            changes.append(f"Volume: {1 if voice['volume'] else 0}")
-                        change_str = ", ".join(changes)
-                        print(f"     /voice_{voice['id']}_* -> {change_str}")
-                    if len(changed_voices) > 5:
-                        print(f"     ... and {len(changed_voices) - 5} more changed voices")
-                if 'changed_count' in response:
-                    print(f"   Total changed voices: {response['changed_count']}")
                 if 'active_count' in response:
-                    print(f"   Total active voices: {response['active_count']}")
-                print("─" * 60)
-                print()  # Extra line break
+                    print(f"   Active voices: {response['active_count']}/48")
+                if 'changed_count' in response:
+                    print(f"   Changed voices: {response['changed_count']}")
                 
                 logger.debug(f"Sent {message_count} OSC messages via pythonosc SimpleUDPClient to 127.0.0.1:{self.send_port}")
             else:
@@ -396,65 +393,3 @@ class UDPHandler:
                 logger.info("Recreated OSC client after error")
             except Exception as recreate_error:
                 logger.error(f"Failed to recreate OSC client: {recreate_error}")
-    
-    def _print_voice_status(self, response: Dict[Any, Any]):
-        """Print a live display of all 48 voices"""
-        # Create a map of voice data for quick lookup
-        voice_map = {}
-        if 'voices' in response:
-            voice_map = {voice['id']: voice for voice in response['voices']}
-        
-        # If we have access to system_state, use it to show all voices
-        # Otherwise, show at least the voices in the response
-        if self.system_state and hasattr(self.system_state, 'voices'):
-            # Display all 48 voices using system state
-            for voice_id in range(1, 49):
-                voice_obj = self.system_state.voices[voice_id - 1]  # 0-indexed
-                
-                # Check if this voice was in the recent changes
-                changed_voice = voice_map.get(voice_id)
-                changed = ""
-                if changed_voice and (changed_voice.get('midi_changed') or changed_voice.get('volume_changed')):
-                    changed = "→"
-                
-                midi = voice_obj.midi_note if voice_obj.midi_note is not None else 0
-                volume = 1 if voice_obj.volume > 0 else 0
-                status = "🔊" if volume else "🔇"
-                
-                print(f"   {voice_id:2d}{changed:>1s}   │ {midi:3d}  │  {volume}  │ {status}")
-        else:
-            # Fallback: show voices from response + empty slots
-            for voice_id in range(1, 49):
-                if voice_id in voice_map:
-                    voice = voice_map[voice_id]
-                    midi = voice.get('midi_note', 0)
-                    volume = 1 if voice.get('volume', False) else 0
-                    status = "🔊" if volume else "🔇"
-                    
-                    # Highlight changed voices
-                    changed = ""
-                    if voice.get('midi_changed') or voice.get('volume_changed'):
-                        changed = "→"
-                    
-                    print(f"   {voice_id:2d}{changed:>1s}   │ {midi:3d}  │  {volume}  │ {status}")
-                else:
-                    # Voice not in response - show as inactive
-                    print(f"   {voice_id:2d}    │  --  │  0  │ 🔇")
-        
-        # Show summary
-        if self.system_state and hasattr(self.system_state, 'voices'):
-            active_voices = sum(1 for voice in self.system_state.voices if voice.volume > 0)
-        else:
-            active_voices = sum(1 for voice in voice_map.values() if voice.get('volume', False))
-        
-        print(f"   ──────┴──────┴─────┴────────")
-        print(f"   Active: {active_voices}/48 voices")
-        
-        # Show which voices changed in this update
-        if voice_map:
-            changed_list = [str(vid) for vid, voice in voice_map.items() 
-                          if voice.get('midi_changed') or voice.get('volume_changed')]
-            if changed_list:
-                print(f"   Changed: {', '.join(changed_list)}")
-        print()
-

@@ -15,14 +15,12 @@ from typing import List
 @dataclass
 class Rank:
     """Rank with grey code interpretation, tonicization, and probability mapping"""
-    number: int  # Scale degree (1-8)
-    position: int  # Priority position (1-8)
+    number: int  # Scale degree (1-8) - fixed, not affected by MaxMSP
+    priority: int  # Priority position (1-8) - can be changed by MaxMSP via /Rn_priority
     grey_code: List[int]  # 4 bits [0,0,0,0]
     gci: int = 0  # Grey Code Integer
     density: int = 0  # Mapped density: 1->2, 2->3, 3->4, 4->6 ones
-    
-    # New properties for FIBRIL algorithm
-    tonicization: int = 0  # Scale degree assignment (1=tonic, 2=supertonic, etc.)
+    tonicization: int = 0  # Scale degree assignment (1-8, 9=subtonic) - can be changed by MaxMSP via /Rn_tonicization
     previous_gci: int = 0  # Previous GCI for voice leading
     probability_map: List[float] = None  # Probability weights for MIDI notes
     
@@ -57,7 +55,7 @@ class Rank:
         """Create a copy of this rank"""
         new_rank = Rank(
             number=self.number,
-            position=self.position,
+            priority=self.priority,
             grey_code=self.grey_code.copy(),
             gci=self.gci,
             density=self.density,
@@ -79,7 +77,7 @@ class Rank:
         
         valid_destinations = []
         
-        if self.tonicization == 8:  # Subtonic - use whole tone scale
+        if self.tonicization == 9:  # Subtonic (sharp 5th, whole tone scale)
             destinations = self._fit_to_whole_tone_scale(rank_tonic, base_intervals, key_center)
         else:  # All other ranks - use major scale
             destinations = self._fit_to_major_scale(rank_tonic, base_intervals, key_center)
@@ -95,8 +93,8 @@ class Rank:
     
     def _get_scale_degree_offset(self, degree: int) -> int:
         """Get semitone offset for scale degree in major scale"""
-        # Major scale intervals: 1=0, 2=2, 3=4, 4=5, 5=7, 6=9, 7=11, 8=0 (octave)
-        offsets = {1: 0, 2: 2, 3: 4, 4: 5, 5: 7, 6: 9, 7: 11, 8: 0}
+        # Major scale intervals: 1=0, 2=2, 3=4, 4=5, 5=7, 6=9, 7=11, 8=0 (octave), 9=6 (subtonic/sharp 5th)
+        offsets = {1: 0, 2: 2, 3: 4, 4: 5, 5: 7, 6: 9, 7: 11, 8: 0, 9: 6}
         return offsets.get(degree, 0)
     
     def _fit_to_major_scale(self, rank_tonic: int, intervals: List[int], key_center: int) -> List[int]:
