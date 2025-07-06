@@ -225,8 +225,7 @@ class FibrilMain:
         
         # Handle key center updates
         elif message.get('address') == '/keyCenter' or message.get('type') == 'key_center':
-            # Get the value from either format
-            new_key_center = message.get('value') if message.get('type') == 'key_center' else message.get('value')
+            new_key_center = message.get('value')
             
             if new_key_center is not None:
                 old_key = self.system_state.key_center
@@ -501,9 +500,9 @@ class FibrilMain:
         # Handle key center updates - note the different case
         elif message.get('address') == '/keyCenter':
             old_key = self.system_state.key_center
-            self.system_state.key_center = int(message.get('value', 0)) % 12
+            self.system_state.key_center = int(message.get('value', 0))  # Full MIDI value, not modulo 12
             if old_key != self.system_state.key_center:
-                logger.info(f"Key center changed to: {self.system_state.key_center}")
+                logger.info(f"Key center changed from MIDI {old_key} to MIDI {self.system_state.key_center}")
                 state_changed = True
         
         return state_changed

@@ -9,7 +9,7 @@ Minimal data structures for the FIBRIL system:
 """
 
 from dataclasses import dataclass
-from typing import List
+from typing import List, Tuple
 
 
 @dataclass
@@ -206,6 +206,10 @@ class SystemState:
     sustained_notes: List[int] = None  # Currently sustained MIDI notes
     current_voicing_notes: List[int] = None  # Currently active MIDI notes
     
+    # Sustain state management
+    previous_sustain: bool = False  # Previous sustain state to detect transitions
+    frozen_voices: List[Tuple[int, int]] = None  # List of (voice_id, midi_note) that are frozen by sustain
+    
     def __post_init__(self):
         """Initialize default values"""
         if self.rank_priority is None:
@@ -217,6 +221,9 @@ class SystemState:
         
         if self.sustained_notes is None:
             self.sustained_notes = []
+        
+        if self.frozen_voices is None:
+            self.frozen_voices = []
         
         if self.current_voicing_notes is None:
             self.current_voicing_notes = []
