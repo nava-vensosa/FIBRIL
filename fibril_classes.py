@@ -9,7 +9,7 @@ Minimal data structures for the FIBRIL system:
 """
 
 from dataclasses import dataclass
-from typing import List
+from typing import List, Tuple
 
 
 @dataclass
@@ -109,17 +109,33 @@ class Rank:
             target_note = (rank_tonic + interval) % 12
             
             if target_note in key_notes:
+                # Check if this would create a sharp 5 (tritone) or flat 13th
+                if interval == 6 or interval == 20:
+                    # Skip sharp 5 and flat 13th - find alternative
+                    continue
                 fitted_intervals.append(interval)
             else:
                 # Find closest in-key note
                 closest_up = self._find_closest_in_key(target_note, key_notes, direction=1)
                 closest_down = self._find_closest_in_key(target_note, key_notes, direction=-1)
                 
-                # Choose based on music theory preference
-                if self._should_adjust_up(interval, target_note, key_notes):
-                    fitted_intervals.append(interval + closest_up)
+                # Calculate the resulting intervals
+                up_interval = interval + closest_up
+                down_interval = interval + closest_down
+                
+                # Avoid sharp 5 and flat 13th in both directions
+                if up_interval == 6 or up_interval == 20:
+                    if down_interval != 6 and down_interval != 20:
+                        fitted_intervals.append(down_interval)
+                    # If both would create forbidden intervals, skip this note
+                elif down_interval == 6 or down_interval == 20:
+                    fitted_intervals.append(up_interval)
                 else:
-                    fitted_intervals.append(interval + closest_down)
+                    # Choose based on music theory preference (neither is forbidden)
+                    if self._should_adjust_up(interval, target_note, key_notes):
+                        fitted_intervals.append(up_interval)
+                    else:
+                        fitted_intervals.append(down_interval)
         
         return fitted_intervals
     
@@ -134,17 +150,33 @@ class Rank:
             target_note = (rank_tonic + interval) % 12
             
             if target_note in key_notes:
+                # Check if this would create a sharp 5 (tritone) or flat 13th
+                if interval == 6 or interval == 20:
+                    # Skip sharp 5 and flat 13th - find alternative
+                    continue
                 fitted_intervals.append(interval)
             else:
                 # Find closest whole tone note
                 closest_up = self._find_closest_in_key(target_note, key_notes, direction=1)
                 closest_down = self._find_closest_in_key(target_note, key_notes, direction=-1)
                 
-                # For whole tone, prefer the closer option
-                if abs(closest_up) <= abs(closest_down):
-                    fitted_intervals.append(interval + closest_up)
+                # Calculate the resulting intervals
+                up_interval = interval + closest_up
+                down_interval = interval + closest_down
+                
+                # Avoid sharp 5 and flat 13th in both directions
+                if up_interval == 6 or up_interval == 20:
+                    if down_interval != 6 and down_interval != 20:
+                        fitted_intervals.append(down_interval)
+                    # If both would create forbidden intervals, skip this note
+                elif down_interval == 6 or down_interval == 20:
+                    fitted_intervals.append(up_interval)
                 else:
-                    fitted_intervals.append(interval + closest_down)
+                    # For whole tone, prefer the closer option (neither is forbidden)
+                    if abs(closest_up) <= abs(closest_down):
+                        fitted_intervals.append(up_interval)
+                    else:
+                        fitted_intervals.append(down_interval)
         
         return fitted_intervals
     
@@ -164,11 +196,8 @@ class Rank:
     def _should_adjust_up(self, interval: int, target_note: int, key_notes: List[int]) -> bool:
         """Music theory heuristic for whether to adjust a note up or down"""
         # Harmonic degree based adjustments
-        if interval == 6:  # #5 (tritone) - usually resolve up
-            return True
-        elif interval == 20:  # b13 - usually resolve down  
-            return False
-        elif interval in [2, 5]:  # 2nd, 4th - tend to resolve up to 3rd, 5th
+        # Note: Sharp 5 (tritone) and flat 13th are now excluded from valid destinations
+        if interval in [2, 5]:  # 2nd, 4th - tend to resolve up to 3rd, 5th
             return True
         elif interval in [11, 17]:  # 7th, 11th - tend to resolve down
             return False
@@ -181,8 +210,9 @@ class Rank:
 class Voice:
     """Voice with MIDI note and volume"""
     midi_note: int
-    volume: int
+    volume: int  # 0 = off, 1 = on (changed from bool to int)
     id: int
+    sustained: bool = False  # Whether this voice is sustained by pedal
 
 
 @dataclass
@@ -202,6 +232,14 @@ class SystemState:
     sustained_notes: List[int] = None  # Currently sustained MIDI notes
     current_voicing_notes: List[int] = None  # Currently active MIDI notes
     
+    # System objects (will be populated by algorithm)
+    ranks: List[Rank] = None
+    voices: List[Voice] = None
+    
+    # Sustain pedal state tracking
+    previous_sustain: int = 0
+    frozen_voices: List[Tuple[int, int]] = None  # List of (voice_id, midi_note) tuples
+    
     def __post_init__(self):
         """Initialize default values"""
         if self.rank_priority is None:
@@ -216,3 +254,41 @@ class SystemState:
         
         if self.current_voicing_notes is None:
             self.current_voicing_notes = []
+        
+        if self.ranks is None:
+            self.ranks = []
+        
+        if self.voices is None:
+            self.voices = []
+        
+        if self.frozen_voices is None:
+            self.frozen_voices = []
+    
+    def copy(self) -> 'SystemState':
+        """Create a copy of this system state"""
+        new_state = SystemState(
+            sustain=self.sustain,
+            key_center=self.key_center,
+            right_hand_mode=self.right_hand_mode,
+            rank_priority=self.rank_priority.copy() if self.rank_priority else None,
+            global_probability_map=self.global_probability_map.copy() if self.global_probability_map else None,
+            sustained_notes=self.sustained_notes.copy() if self.sustained_notes else None,
+            current_voicing_notes=self.current_voicing_notes.copy() if self.current_voicing_notes else None,
+            previous_sustain=self.previous_sustain,
+            frozen_voices=self.frozen_voices.copy() if self.frozen_voices else None
+        )
+        
+        # Deep copy ranks and voices
+        if self.ranks:
+            new_state.ranks = [rank.copy() for rank in self.ranks]
+        if self.voices:
+            new_state.voices = [
+                Voice(
+                    midi_note=voice.midi_note,
+                    volume=voice.volume,
+                    id=voice.id,
+                    sustained=voice.sustained
+                ) for voice in self.voices
+            ]
+        
+        return new_state
