@@ -116,7 +116,7 @@ class FibrilSystem:
         if active_voices:
             for voice in active_voices:
                 # Import here to avoid circular imports
-                from fibril_algorithms import midi_to_note_name
+                from fibril_new_algorithm import midi_to_note_name
                 note_name = midi_to_note_name(voice.midi_note)
                 print(f"  Voice {voice.id}: MIDI={voice.midi_note} ({note_name}), Volume={voice.volume}")
         else:
