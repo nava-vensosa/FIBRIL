@@ -51,13 +51,15 @@ class FibrilSystem:
             )
             self.ranks.append(rank)
         
-        # Initialize 48 voices with random MIDI notes from specified set
-        midi_notes = [48, 55, 60, 67, 72]
+        # Initialize 48 voices with C or G in octaves 3-5
+        # C notes: C3=48, C4=60, C5=72
+        # G notes: G3=55, G4=67, G5=79
+        midi_notes = [48, 55, 60, 67, 72, 79]  # C3, G3, C4, G4, C5, G5
         self.voices = []
         for i in range(48):
             voice = fibril_classes.Voice(
-                midi_note=random.choice(midi_notes),  # Random from (48, 55, 60, 67, 72)
-                volume=False,           # Default off
+                midi_note=random.choice(midi_notes),  # Random from C or G in octaves 3-5
+                volume=0,              # Default off (using int value)
                 id=i + 1               # Voice ID 1-48
             )
             self.voices.append(voice)
@@ -67,7 +69,7 @@ class FibrilSystem:
         
         # Global system parameters
         self.sustain = 0
-        self.key_center = 0
+        self.key_center = 60
     
     def get_rank(self, number: int):
         """Get rank by number (1-8)"""
