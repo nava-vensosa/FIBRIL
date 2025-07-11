@@ -204,10 +204,7 @@ class FibrilMain:
                 for voice in self.system.voices:
                     self._send_voice_update(voice.id, voice.midi_note, voice.volume)
                 
-                # Log allocation results
-                if result['allocated'] > 0:
-                    active_voices = len(fibril_algorithm.get_active_midi_notes())
-                    logger.info(f"Probabilistic allocation: {result['allocated']}/{result['target']} voices, {active_voices} total active")
+                # Removed verbose logging for cleaner output
                 
                 # Update state tracking
                 self.previous_state = current_state

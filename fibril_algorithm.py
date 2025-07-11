@@ -57,7 +57,7 @@ def calculate_target_voice_count(active_ranks, max_voices: int = 48) -> int:
 def get_rank_middle_octave_midi(rank) -> int:
     """Calculate rank's middle octave MIDI note from GCI"""
     middle_c = 60  # MIDI 60 = C4
-    octave_offset = (rank.gci - 5) // 3
+    octave_offset = 1 + ((rank.gci - 5) // 3)
     return middle_c + (octave_offset * 12)
 
 def get_rank_octave_spread(rank) -> int:
@@ -159,8 +159,7 @@ def deallocate_all_voices():
             voice.midi_note = 0
             deallocated += 1
     
-    if deallocated > 0:
-        print(f"✓ Deallocated {deallocated} voices")
+    # Removed print statement for cleaner output
 
 def state_readout():
     """Complete state readout of the FIBRIL system"""

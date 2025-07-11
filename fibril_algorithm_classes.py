@@ -73,10 +73,10 @@ class AlgorithmParameters:
 @dataclass
 class DebugSettings:
     """Debug and logging configuration"""
-    DEBUG_VERBOSE: bool = True
+    DEBUG_VERBOSE: bool = False
     PRINT_PROBABILITY_MAPS: bool = False
-    PRINT_CONSTRAINT_APPLICATIONS: bool = True
-    PRINT_SELECTIONS: bool = True
+    PRINT_CONSTRAINT_APPLICATIONS: bool = False
+    PRINT_SELECTIONS: bool = False
     SNAPSHOT_FREQUENCY: str = "every_selection"
     MAX_HISTORY_SIZE: int = 1000
 
