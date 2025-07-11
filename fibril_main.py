@@ -203,7 +203,7 @@ class FibrilMain:
             
             self.osc_client.send_message(address, [midi_note, volume_int])
             self.osc_client.send_message(f"{address}_MIDI", midi_note)
-            self.osc_client.send_message(f"{address}_volume", volume_int)
+            self.osc_client.send_message(f"{address}_Volume", volume_int)
             
             logger.debug(f"Sent {address}: MIDI={midi_note}, Volume={volume_int}")
             
