@@ -70,9 +70,9 @@ class Rank:
     
     def get_valid_destinations(self, key_center: int) -> List[int]:
         """Get valid MIDI destinations for this rank based on its tonicization and key center"""
-        # Base harmonic degrees: 1, 5, 3, 2, 4, 6, 7, 9, 11, b13, #5
+        # Base harmonic degrees: 1, 5, 3, 2, 4, 6, 7, 9, 11
         # These are intervals from the rank's tonic (in semitones)
-        base_intervals = [0, 7, 4, 2, 5, 9, 11, 14, 17, 20, 6]  # 1, 5, 3, 2, 4, 6, 7, 9, 11, b13, #5
+        base_intervals = [0, 7, 4, 2, 5, 9, 11, 14, 17]  # 1, 5, 3, 2, 4, 6, 7, 9, 11
         
         # Calculate the rank's tonic based on its tonicization and key center
         rank_tonic = (key_center + self._get_scale_degree_offset(self.tonicization)) % 12
@@ -181,21 +181,21 @@ class Rank:
 class Voice:
     """Voice with MIDI note and volume"""
     midi_note: int
-    volume: bool
+    volume: int
     id: int
 
 
 @dataclass
 class SystemState:
     """Global system state for FIBRIL algorithm"""
-    sustain: bool = False
+    sustain: int = 0
     key_center: int = 0  # Key center offset
     
     # Layout modes
     right_hand_mode: str = "R->L"  # "R->L" or "Mirrored"
     
     # Priority order for rank evaluation
-    rank_priority: List[int] = None  # Will be [3, 6, 1, 4, 5, 2, 8, 7] by default
+    rank_priority: List[int] = None  # Will be [3, 4, 2, 6, 1, 5, 7, 8] by default
     
     # Algorithm state
     global_probability_map: List[float] = None  # Global probability weights
@@ -205,8 +205,8 @@ class SystemState:
     def __post_init__(self):
         """Initialize default values"""
         if self.rank_priority is None:
-            # Updated priority order: [R1(tonic), R4(subdominant), R2(supertonic), R5(dominant), R6(submediant), R3(mediant), R7(leading), R8(subtonic)]
-            self.rank_priority = [1, 4, 2, 5, 6, 3, 7, 8]
+            # Updated priority order: [R3(tonic), R4(subdominant), R2(supertonic), R6(dominant), R1(submediant), R5(mediant), R7(leading), R8(subtonic)]
+            self.rank_priority = [3, 4, 2, 6, 1, 5, 7, 8]
         
         if self.global_probability_map is None:
             self.global_probability_map = [0.0] * 128
