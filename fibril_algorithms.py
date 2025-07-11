@@ -223,7 +223,7 @@ class FibrilAlgorithm:
         self.rooted_notes_cache.clear()
         
         for rank in active_ranks:
-            if rank.tonicization == 9:  # Subtonic rank - use 3rd and flat 7th of key center
+            if rank.tonicization == 8:  # Subtonic rank - use 3rd and flat 7th of key center
                 key_center_pc = system_state.key_center % 12  # Get pitch class
                 root_midi = (key_center_pc + 4) % 12  # Major 3rd of key center
                 fifth_midi = (key_center_pc + 10) % 12  # Minor 7th (flat 7th) of key center
@@ -240,30 +240,30 @@ class FibrilAlgorithm:
             
             # Force allocation of missing root/fifth (but avoid frozen voices)
             if not root_present:
-                self._force_allocate_note(system_state, root_midi, rank.priority, frozen_voice_ids)
+                self._force_allocate_note(system_state, root_midi, rank.position, frozen_voice_ids)
                 self.rooted_notes_cache.add(root_midi)
             
             if not fifth_present:
-                self._force_allocate_note(system_state, fifth_midi, rank.priority, frozen_voice_ids)
+                self._force_allocate_note(system_state, fifth_midi, rank.position, frozen_voice_ids)
                 self.rooted_notes_cache.add(fifth_midi)
     
     def _get_rank_root(self, rank: Rank, key_center: int) -> int:
         """Get the root note (MIDI % 12) for a rank based on its tonicization"""
         key_center_pc = key_center % 12  # Get pitch class from full MIDI value
-        if rank.tonicization == 9:  # Subtonic - return 3rd of key center
+        if rank.tonicization == 8:  # Subtonic - return 3rd of key center
             return (key_center_pc + 4) % 12
         else:
             scale_degree_offsets = {1: 0, 2: 2, 3: 4, 4: 5, 5: 7, 6: 9, 7: 11, 8: 0}
             offset = scale_degree_offsets.get(rank.tonicization, 0)
             return (key_center_pc + offset) % 12
     
-    def _force_allocate_note(self, system_state: SystemState, midi_note_class: int, rank_priority: int, frozen_voice_ids: Set[int] = None):
+    def _force_allocate_note(self, system_state: SystemState, midi_note_class: int, rank_position: int, frozen_voice_ids: Set[int] = None):
         """Force allocation of a specific note class, choosing optimal octave"""
         if frozen_voice_ids is None:
             frozen_voice_ids = set()
         
-        # Find the best octave based on rank priority and current voicing
-        best_octave = self._choose_optimal_octave(system_state, midi_note_class, rank_priority)
+        # Find the best octave based on rank position and current voicing
+        best_octave = self._choose_optimal_octave(system_state, midi_note_class, rank_position)
         target_midi = midi_note_class + best_octave * 12
         
         # Find an available voice or steal the lowest priority one (avoid frozen voices)
@@ -300,14 +300,14 @@ class FibrilAlgorithm:
                 # Clear sustained flag if sustain is not active
                 system_state.voices[target_voice_idx].sustained = False
     
-    def _choose_optimal_octave(self, system_state: SystemState, midi_note_class: int, rank_priority: int) -> int:
-        """Choose optimal octave for a note based on priority and current voicing"""
-        # Lower priority ranks prefer higher octaves to avoid muddiness
-        # Higher priority ranks get midrange
-        priority_factor = (8 - rank_priority) / 8.0  # 0.0 for highest priority, 0.875 for lowest
+    def _choose_optimal_octave(self, system_state: SystemState, midi_note_class: int, rank_position: int) -> int:
+        """Choose optimal octave for a note based on position and current voicing"""
+        # Lower position ranks prefer higher octaves to avoid muddiness
+        # Higher position ranks get midrange
+        position_factor = (8 - rank_position) / 8.0  # 0.0 for highest position, 0.875 for lowest
         
-        # Base octave: 4 for high priority, 5-6 for low priority
-        base_octave = 4 + int(priority_factor * 2)
+        # Base octave: 4 for high position, 5-6 for low position
+        base_octave = 4 + int(position_factor * 2)
         
         # Ensure MIDI note is in valid range
         target_midi = midi_note_class + base_octave * 12
@@ -351,11 +351,11 @@ class FibrilAlgorithm:
         Build the global probability map by overlaying all rank probability curves
         
         Applies octave separation heuristic:
-        - Octave number = (rank.priority + 7) / 2
+        - Octave number = (rank.position + 7) / 2
         - Center MIDI = key_center + (octave_number - 4) * 12
-        - Priority 1 → octave 4 (at key center)
-        - Priority 2 → octave 4.5 (half octave above key center)
-        - Priority 8 → octave 7.5 (3.5 octaves above key center)
+        - Position 1 → octave 4 (at key center)
+        - Position 2 → octave 4.5 (half octave above key center)
+        - Position 8 → octave 7.5 (3.5 octaves above key center)
         - This prevents all ranks from clustering in the same octave
         """
         self.global_probability_map = [0.0] * 128
@@ -382,10 +382,10 @@ class FibrilAlgorithm:
                 # Multiply curves together
                 rank_curve = [a * b for a, b in zip(rank_curve, voice_leading_curve)]
             
-            # Apply octave/priority bias using Gaussian curve
-            # Formula: (priority + 7) / 2 gives octave number relative to key center
-            # Priority 1 → octave 4, Priority 2 → octave 4.5, Priority 3 → octave 5, etc.
-            octave_number = (rank.priority + 7) / 2
+            # Apply octave/position bias using Gaussian curve
+            # Formula: (position + 7) / 2 gives octave number relative to key center
+            # Position 1 → octave 4, Position 2 → octave 4.5, Position 3 → octave 5, etc.
+            octave_number = (rank.position + 7) / 2
             octave_center_midi = system_state.key_center + (octave_number - 4) * 12  # Relative to key center at octave 4
             octave_bias_curve = ProbabilityCurve.gaussian(
                 octave_center_midi, width=18  # 1.5 octave spread
@@ -394,10 +394,10 @@ class FibrilAlgorithm:
             
             # Debug log for octave separation
             octave_display = f"{octave_number:.1f}" if octave_number != int(octave_number) else str(int(octave_number))
-            print(f"Rank {rank.number} (priority {rank.priority}): octave {octave_display} relative to key center = MIDI {octave_center_midi:.1f}")
+            print(f"Rank {rank.number} (position {rank.position}): octave {octave_display} relative to key center = MIDI {octave_center_midi:.1f}")
             
-            # Weight by rank priority and add to global map
-            rank_weight = (9 - rank.priority) / 8.0  # Higher priority = higher weight
+            # Weight by rank position and add to global map
+            rank_weight = (9 - rank.position) / 8.0  # Higher position = higher weight
             for i in range(128):
                 self.global_probability_map[i] += rank_curve[i] * rank_weight
         

@@ -21,19 +21,33 @@ class FibrilSystem:
     """Container for all FIBRIL system objects"""
     
     def __init__(self):
-        # Updated tonicization mapping per user request:
-        # R1: tonic, R2: supertonic, R3: mediant, R4: subdominant,
-        # R5: dominant, R6: submediant, R7: leading tone, R8: subtonic
-        default_tonicizations = [1, 2, 3, 4, 5, 6, 7, 8]
+        # Rank assignments to scale degrees:
+        # R3→tonic(1), R4→subdominant(4), R2→supertonic(2), R6→dominant(5), 
+        # R1→submediant(6), R5→mediant(3), R7→leading(7), R8→subtonic(8)
+        rank_tonicizations = {
+            1: 6,  # R1 plays submediant (scale degree 6)
+            2: 2,  # R2 plays supertonic (scale degree 2)  
+            3: 1,  # R3 plays tonic (scale degree 1)
+            4: 4,  # R4 plays subdominant (scale degree 4)
+            5: 3,  # R5 plays mediant (scale degree 3)
+            6: 5,  # R6 plays dominant (scale degree 5)
+            7: 7,  # R7 plays leading tone (scale degree 7)
+            8: 8   # R8 plays subtonic (scale degree 8)
+        }
         
-        # Initialize 8 ranks with default values
+        # Priority order: [3, 4, 2, 6, 1, 5, 7, 8]
+        priority_order = [3, 4, 2, 6, 1, 5, 7, 8]
+        rank_positions = {rank_num: pos + 1 for pos, rank_num in enumerate(priority_order)}
+        
+        # Initialize 8 ranks with correct tonicizations and positions
         self.ranks = []
         for i in range(8):
+            rank_number = i + 1
             rank = fibril_classes.Rank(
-                number=i + 1,           # Rank number 1-8
-                position=i + 1,         # Initial position 1-8 
-                grey_code=[0, 0, 0, 0], # Default grey code
-                tonicization=default_tonicizations[i]  # Default scale degree
+                number=rank_number,                        # Rank number 1-8
+                position=rank_positions[rank_number],      # Position based on priority order
+                grey_code=[0, 0, 0, 0],                   # Default grey code
+                tonicization=rank_tonicizations[rank_number]  # Scale degree to play
             )
             self.ranks.append(rank)
         
