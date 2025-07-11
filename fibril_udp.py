@@ -4,7 +4,7 @@ FIBRIL UDP Handler
 
 UDP communication for FIBRIL system:
 - Listens on port 1761 for MaxMSP OSC messages
-- Sends voice data to port 1762 
+- Sends voice data to port 8998 
 - 18ms input buffer
 - Updates rank and voice objects from fibril_init.py
 """
@@ -45,7 +45,7 @@ class UDPHandler:
         self.send_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.send_socket.setblocking(False)
         
-        logger.info("UDP Handler listening on port 1761, sending to 1762")
+        logger.info("UDP Handler listening on port 1761, sending to 8998")
         
         while True:
             try:
@@ -131,13 +131,13 @@ class UDPHandler:
             return "", 0
     
     async def send_voice(self, voice_id: int, midi_note: int, volume: bool):
-        """Send voice data to MaxMSP on port 1762"""
+        """Send voice data to MaxMSP on port 8998"""
         try:
             address = f"/voice_{voice_id}"
             message = self._encode_osc(address, midi_note, int(volume))
             
             await asyncio.get_event_loop().sock_sendto(
-                self.send_socket, message, ("127.0.0.1", 1762)
+                self.send_socket, message, ("127.0.0.1", 8998)
             )
             
             logger.debug(f"Sent voice {voice_id}: MIDI={midi_note}, Volume={volume}")
