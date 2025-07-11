@@ -19,7 +19,7 @@ from pythonosc.udp_client import SimpleUDPClient
 
 # Import FIBRIL components
 import fibril_init
-from fibril_algorithms import FibrilAlgorithm
+import fibril_algorithms
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -32,7 +32,6 @@ class FibrilMain:
     def __init__(self):
         # FIBRIL system components
         self.system = fibril_init.fibril_system
-        self.algorithm = FibrilAlgorithm()
         
         # Network components
         self.osc_server = None
@@ -171,43 +170,21 @@ class FibrilMain:
                 if self._has_state_changed(current_state):
                     self.system.print_system_state()
                 
-                # Copy system state for algorithm processing
-                system_state = fibril_init.fibril_classes.SystemState(
-                    sustain=self.system.sustain,
-                    key_center=self.system.key_center
-                )
-                system_state.ranks = [rank.copy() for rank in self.system.ranks]
-                system_state.voices = [
-                    fibril_init.fibril_classes.Voice(
-                        midi_note=voice.midi_note,
-                        volume=voice.volume,
-                        id=voice.id
-                    ) for voice in self.system.voices
-                ]
+                # Clear previous voices if sustain is off
+                if not self.system.sustain:
+                    fibril_algorithms.deallocate_all_voices()
                 
-                # Run FIBRIL algorithm
-                new_state = self.algorithm.allocate_voices(system_state)
+                # Run probabilistic voice allocation
+                result = fibril_algorithms.probabilistic_voice_allocation(max_voices=8)
                 
-                # Apply results back to system and send OSC messages
-                changes_made = False
-                for i, new_voice in enumerate(new_state.voices):
-                    old_voice = self.system.voices[i]
+                # Send voice updates to MaxMSP
+                if result['allocated'] > 0:
+                    active_voices = len(fibril_algorithms.get_active_midi_notes())
+                    logger.info(f"Probabilistic allocation: {result['allocated']}/{result['target']} voices, {active_voices} total active")
                     
-                    # Check if this voice changed
-                    if (old_voice.midi_note != new_voice.midi_note or 
-                        old_voice.volume != new_voice.volume):
-                        
-                        # Update system voice
-                        old_voice.midi_note = new_voice.midi_note
-                        old_voice.volume = new_voice.volume
-                        
-                        # Send OSC message to MaxMSP
-                        self._send_voice_update(new_voice.id, new_voice.midi_note, new_voice.volume)
-                        changes_made = True
-                
-                if changes_made:
-                    active_voices = sum(1 for v in self.system.voices if v.volume)
-                    logger.info(f"Algorithm processed - {active_voices} active voices")
+                    # Send all voice states to MaxMSP
+                    for voice in self.system.voices:
+                        self._send_voice_update(voice.id, voice.midi_note, voice.volume)
                 
                 # Update state tracking
                 self.previous_state = current_state
@@ -215,6 +192,8 @@ class FibrilMain:
                 
         except Exception as e:
             logger.error(f"Error in algorithm processing: {e}")
+            import traceback
+            traceback.print_exc()
     
     def _send_voice_update(self, voice_id: int, midi_note: int, volume: bool):
         """Send voice update to MaxMSP via OSC"""
@@ -223,6 +202,8 @@ class FibrilMain:
             volume_int = 1 if volume else 0
             
             self.osc_client.send_message(address, [midi_note, volume_int])
+            self.osc_client.send_message(f"{address}_MIDI", midi_note)
+            self.osc_client.send_message(f"{address}_volume", volume_int)
             
             logger.debug(f"Sent {address}: MIDI={midi_note}, Volume={volume_int}")
             
