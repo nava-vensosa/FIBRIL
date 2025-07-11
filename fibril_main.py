@@ -19,7 +19,7 @@ from pythonosc.udp_client import SimpleUDPClient
 
 # Import FIBRIL components
 import fibril_init
-import fibril_new_algorithm
+import fibril_algorithm
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -167,10 +167,10 @@ class FibrilMain:
                 
                 # Clear previous voices if sustain is off
                 if not self.system.sustain:
-                    fibril_new_algorithm.deallocate_all_voices()
+                    fibril_algorithm.deallocate_all_voices()
                 
                 # Run probabilistic voice allocation
-                result = fibril_new_algorithm.probabilistic_voice_allocation(max_voices=48)
+                result = fibril_algorithm.probabilistic_voice_allocation(max_voices=48)
                 
                 # Send all voice states to MaxMSP (always send all voices to ensure consistency)
                 for voice in self.system.voices:
@@ -178,7 +178,7 @@ class FibrilMain:
                 
                 # Log allocation results
                 if result['allocated'] > 0:
-                    active_voices = len(fibril_new_algorithm.get_active_midi_notes())
+                    active_voices = len(fibril_algorithm.get_active_midi_notes())
                     logger.info(f"Probabilistic allocation: {result['allocated']}/{result['target']} voices, {active_voices} total active")
                 
                 # Update state tracking

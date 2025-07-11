@@ -242,7 +242,7 @@ class RankSpreadConstraint(ProbabilityConstraint):
     def calculate_rank_boundaries(self, rank) -> Tuple[int, int]:
         """Calculate MIDI range for rank based on GCI and density"""
         # Import here to avoid circular imports
-        from fibril_new_algorithm import get_rank_middle_octave_midi, get_rank_octave_spread
+        from fibril_algorithm import get_rank_middle_octave_midi, get_rank_octave_spread
         
         center_midi = get_rank_middle_octave_midi(rank)
         octave_spread = get_rank_octave_spread(rank)
@@ -437,7 +437,7 @@ class HarmonicFunctionHeuristic(ProbabilityConstraint):
             return
         
         # Import here to avoid circular imports
-        from fibril_new_algorithm import get_rank_root_pc
+        from fibril_algorithm import get_rank_root_pc
         
         root_pc = get_rank_root_pc(rank, key_center)
         
@@ -480,13 +480,13 @@ class SpatialPreferenceHeuristic(ProbabilityConstraint):
     def get_rank_spatial_center(self, rank) -> int:
         """Get rank's spatial center MIDI note"""
         # Import here to avoid circular imports
-        from fibril_new_algorithm import get_rank_middle_octave_midi
+        from fibril_algorithm import get_rank_middle_octave_midi
         return get_rank_middle_octave_midi(rank)
     
     def calculate_spatial_spread(self, rank) -> float:
         """Calculate spatial spread for Gaussian"""
         # Import here to avoid circular imports
-        from fibril_new_algorithm import get_rank_octave_spread
+        from fibril_algorithm import get_rank_octave_spread
         
         octave_spread = get_rank_octave_spread(rank)
         if octave_spread == 0:
@@ -548,7 +548,7 @@ class RankProcessor:
         self.apply_all_constraints(prob_map, context, constraint_list)
         
         # Select and allocate voice
-        from fibril_new_algorithm import select_and_allocate_voice
+        from fibril_algorithm import select_and_allocate_voice
         
         selected_midi = select_and_allocate_voice(prob_map, context)
         if selected_midi is not None:
