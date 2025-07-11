@@ -170,7 +170,7 @@ class FibrilMain:
                     fibril_algorithms.deallocate_all_voices()
                 
                 # Run probabilistic voice allocation
-                result = fibril_algorithms.probabilistic_voice_allocation(max_voices=8)
+                result = fibril_algorithms.probabilistic_voice_allocation(max_voices=48)
                 
                 # Send all voice states to MaxMSP (always send all voices to ensure consistency)
                 for voice in self.system.voices:

@@ -40,10 +40,30 @@ def get_active_ranks():
     """Get list of currently active ranks (density > 0)"""
     return [rank for rank in fibril_system.ranks if rank.density > 0]
 
-def calculate_target_voice_count(active_ranks, max_voices=8):
-    """Calculate how many voices should be allocated based on rank density"""
+def calculate_target_voice_count(active_ranks, max_voices=48):
+    """Calculate how many voices should be allocated based on total rank density"""
     total_density = sum(rank.density for rank in active_ranks)
     return min(max_voices, total_density)
+
+def midi_to_note_name(midi_note):
+    """Convert MIDI note number to note name (e.g., 60 -> 'C4')"""
+    if midi_note < 0 or midi_note > 127:
+        return f"MIDI{midi_note}"
+    
+    note_names = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B']
+    octave = (midi_note // 12) - 1
+    note = note_names[midi_note % 12]
+    return f"{note}{octave}"
+
+def get_rank_middle_octave_midi(rank):
+    """Calculate rank's middle octave MIDI note from GCI"""
+    middle_c = 60  # MIDI 60 = C4
+    octave_offset = (rank.gci - 8) // 4
+    return middle_c + (octave_offset * 12)
+
+def get_rank_octave_spread(rank):
+    """Calculate octave spread based on rank density (density // 2)"""
+    return rank.density // 2
 
 def rank_to_position(rank_number):
     """Convert rank number to (row, column) position on 4x2 interface grid"""
@@ -89,74 +109,57 @@ def calculate_spatial_clustering(active_ranks):
     return centroid, spread, cluster_mode
 
 def build_spatial_probability_layer(active_ranks):
-    """Build spatial probability layer based on button clustering"""
+    """Build spatial probability layer based on rank-specific GCI and density constraints"""
     layer_probabilities = [0.0] * 128
     
     if not active_ranks:
         return layer_probabilities
     
-    # Calculate spatial clustering
-    centroid, spread, cluster_mode = calculate_spatial_clustering(active_ranks)
+    # Hard zero ranges: MIDI 0-14 and 113-127
+    for midi in range(15):  # 0-14
+        layer_probabilities[midi] = 0.0
+    for midi in range(113, 128):  # 113-127
+        layer_probabilities[midi] = 0.0
     
-    # Keyboard center bias (around C4 = MIDI 60)
-    keyboard_center = 60
+    # Build probability from each active rank's GCI-derived center and density spread
+    for rank in active_ranks:
+        rank_middle_midi = get_rank_middle_octave_midi(rank)
+        octave_spread = get_rank_octave_spread(rank)  # density // 2
+        
+        # If no spread (density 0 or 1), use minimum 1 octave spread
+        if octave_spread == 0:
+            octave_spread = 1
+            
+        spread_semitones = octave_spread * 12  # Convert octaves to semitones
+        rank_weight = rank.density / sum(r.density for r in active_ranks)  # Normalize by rank importance
+        
+        print(f"   Rank {rank.number}: GCI={rank.gci}, density={rank.density}, middle={midi_to_note_name(rank_middle_midi)}, spread=±{octave_spread} oct")
+        
+        # Apply Gaussian distribution around rank's middle
+        for midi in range(15, 113):  # Only in valid range
+            distance = abs(midi - rank_middle_midi)
+            # Gaussian falloff with spread_semitones as standard deviation
+            gaussian_weight = math.exp(-(distance ** 2) / (2 * (spread_semitones / 2) ** 2))
+            
+            # Weight by rank's relative importance
+            layer_probabilities[midi] += gaussian_weight * rank_weight
     
-    if cluster_mode == "clustered":
-        # Clustered mode: concentrate notes in 2-3 octaves around a target point
-        target_octave_offset = (centroid[0] - 2.5) * 12  # Center around row 2.5
-        target_center = keyboard_center + target_octave_offset
-        cluster_width = 24  # 2 octaves spread
-        
-        for midi in range(128):
-            # Gaussian bias around target center
-            distance = abs(midi - target_center)
-            octave_bias = math.exp(-(distance ** 2) / (2 * (cluster_width / 3) ** 2))
-            
-            # Strong anti-muddiness and extreme range penalties
-            if midi < 36:  # Bottom octave (C1 and below)
-                octave_bias *= 0.05
-            elif midi < 48:  # Low range (C2-B2)
-                octave_bias *= 0.3
-            elif midi < 60:  # Mid-low range (C3-B3)
-                octave_bias *= 0.7
-            elif midi > 96:  # Top octave (C7 and above)
-                octave_bias *= 0.05
-            elif midi > 84:  # High range (C6-B6)
-                octave_bias *= 0.4
-            elif midi > 72:  # Mid-high range (C5-B5)
-                octave_bias *= 1.2
-            
-            layer_probabilities[midi] = octave_bias
-    else:
-        # Dispersed mode: spread notes across multiple octaves
-        peak_octaves = [48, 60, 72, 84]  # C3, C4, C5, C6
-        
-        for midi in range(128):
-            total_bias = 0.0
-            for peak in peak_octaves:
-                distance = abs(midi - peak)
-                peak_bias = math.exp(-(distance ** 2) / (2 * (18) ** 2))
-                total_bias += peak_bias
-            
-            # Strong anti-muddiness and extreme range penalties for dispersed mode
-            if midi < 36:  # Bottom octave (C1 and below)
-                total_bias *= 0.02
-            elif midi < 48:  # Low range (C2-B2)
-                total_bias *= 0.1
-            elif midi < 60:  # Mid-low range (C3-B3)
-                total_bias *= 0.5
-            elif midi > 96:  # Top octave (C7 and above)
-                total_bias *= 0.02
-            elif midi > 84:  # High range (C6-B6)
-                total_bias *= 0.3
-            elif midi > 72:  # Mid-high range (C5-B5)
-                total_bias *= 1.5
-            
-            layer_probabilities[midi] = total_bias
+    # Apply general octave bias (still prefer mid-range over extremes)
+    for midi in range(15, 113):
+        # Mild preference for mid-range (reduce very low and very high)
+        if midi < 36:  # Below C2
+            layer_probabilities[midi] *= 0.4
+        elif midi < 48:  # C2-B2
+            layer_probabilities[midi] *= 0.7
+        elif midi > 96:  # Above C7
+            layer_probabilities[midi] *= 0.3
+        elif midi > 84:  # C6-B6
+            layer_probabilities[midi] *= 0.6
     
     # Normalize layer
     max_prob = max(layer_probabilities) if max(layer_probabilities) > 0 else 1.0
-    layer_probabilities = [p / max_prob for p in layer_probabilities]
+    if max_prob > 0:
+        layer_probabilities = [p / max_prob for p in layer_probabilities]
     
     return layer_probabilities
 
@@ -283,11 +286,19 @@ def apply_probability_layer(layer_probabilities, layer_weight):
 def normalize_probability_map():
     """Normalize the probability map to ensure values stay reasonable"""
     global probability_map
+    
+    # Enforce hard zero ranges: MIDI 0-14 and 113-127
+    for midi in range(15):  # 0-14
+        probability_map[midi] = 0.0
+    for midi in range(113, 128):  # 113-127
+        probability_map[midi] = 0.0
+    
     max_prob = max(probability_map) if max(probability_map) > 0 else 1.0
     
     # Scale so maximum probability is around 0.7 (never guarantee anything)
     target_max = 0.7
-    probability_map = [p * (target_max / max_prob) for p in probability_map]
+    if max_prob > 0:
+        probability_map = [p * (target_max / max_prob) for p in probability_map]
 
 def capture_probability_snapshot(voice_index):
     """Capture a deep copy of current probability map for visualization"""
@@ -407,7 +418,7 @@ def clear_visualization_history():
     voice_probability_history = []
     selection_metadata = []
 
-def probabilistic_voice_allocation(max_voices=8):
+def probabilistic_voice_allocation(max_voices=48):
     """
     Main probabilistic voice allocation function
     
@@ -431,12 +442,8 @@ def probabilistic_voice_allocation(max_voices=8):
     target_voice_count = calculate_target_voice_count(active_ranks, max_voices)
     current_active = len(get_active_midi_notes())
     
-    # Calculate spatial clustering info for context
-    centroid, spread, cluster_mode = calculate_spatial_clustering(active_ranks)
-    
-    print(f"   Target voices: {target_voice_count}, Current: {current_active}")
-    print(f"   Spatial mode: {cluster_mode} (spread: {spread:.2f})")
-    print(f"   Active ranks: {[r.number for r in active_ranks]}")
+    print(f"   Target voices: {target_voice_count} (total density), Current: {current_active}")
+    print(f"   Active ranks: {[(r.number, r.density) for r in active_ranks]}")
     
     allocated_count = 0
     
@@ -476,14 +483,12 @@ def probabilistic_voice_allocation(max_voices=8):
             
             # Record metadata
             record_selection_metadata(voice_number, selected_note, {
-                'spatial_mode': cluster_mode,
                 'active_ranks': [r.number for r in active_ranks],
-                'voice_id': voice_id,
-                'centroid': centroid,
-                'spread': spread
+                'voice_id': voice_id
             })
             
-            print(f"     Selected MIDI {selected_note} (probability: {probability_map[selected_note]:.3f})")
+            note_name = midi_to_note_name(selected_note)
+            print(f"     Selected MIDI {selected_note} ({note_name}) - Voice {voice_id} (prob: {probability_map[selected_note]:.3f})")
         else:
             print(f"     Failed to allocate voice")
             break
@@ -493,23 +498,24 @@ def probabilistic_voice_allocation(max_voices=8):
     return {
         'allocated': allocated_count,
         'target': target_voice_count,
-        'spatial_mode': cluster_mode,
+        'spatial_mode': 'gci_based',
         'visualization_data': get_visualization_data()
     }
 
 def state_readout():
     """Complete state readout of the FIBRIL system"""
     print("\n=== FIBRIL Voice States ===")
-    print("Voice | MIDI | Vol | Sustained")
-    print("------|------|-----|----------")
+    print("Voice | MIDI Note     | Vol | Sustained")
+    print("------|---------------|-----|----------")
     active_count = 0
     
     for voice in fibril_system.voices:
-        midi_note = f"{voice.midi_note:3d}"
+        note_name = midi_to_note_name(voice.midi_note)
+        midi_display = f"{voice.midi_note:3d} ({note_name})"
         volume = voice.volume
         sustained = "YES" if hasattr(voice, 'sustained') and voice.sustained else "NO"
         
-        print(f"  {voice.id:2d}  | {midi_note} |  {volume}  |    {sustained}")
+        print(f"  {voice.id:2d}  | {midi_display:13s} |  {volume}  |    {sustained}")
         
         if voice.volume:
             active_count += 1
