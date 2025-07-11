@@ -96,8 +96,36 @@ class FibrilMain:
         """Handle sustain pedal messages"""
         try:
             value = args[0] if args else 0
-            self.system.sustain = int(value)
-            logger.debug(f"Updated sustain = {value}")
+            sustain_value = int(value)
+            
+            if sustain_value == 1:
+                # Sustain pedal pressed - sustain all currently active voices
+                sustained_count = 0
+                for voice in self.system.voices:
+                    if voice.volume == 1 and not voice.sustained:
+                        voice.sustained = True
+                        sustained_count += 1
+                
+                logger.info(f"Sustain ON: {sustained_count} voices sustained")
+                
+            else:
+                # Sustain pedal released - deallocate all sustained voices
+                deallocated_count = 0
+                for voice in self.system.voices:
+                    if voice.sustained:
+                        voice.sustained = False
+                        voice.volume = 0
+                        voice.midi_note = 0  # Reset MIDI note for clarity
+                        deallocated_count += 1
+                
+                logger.info(f"Sustain OFF: {deallocated_count} sustained voices deallocated")
+            
+            self.system.sustain = sustain_value
+            
+            # Send OSC updates for all voices (sustained voices now show volume=0)
+            if sustain_value == 0:
+                self._send_all_voice_updates()
+            
         except Exception as e:
             logger.error(f"Error handling sustain message: {e}")
     
@@ -204,6 +232,15 @@ class FibrilMain:
             
         except Exception as e:
             logger.error(f"Error sending voice update: {e}")
+    
+    def _send_all_voice_updates(self):
+        """Send OSC updates for all voices"""
+        try:
+            for voice in self.system.voices:
+                # Send current state (sustained voices now show volume=0 after release)
+                self._send_voice_update(voice.id, voice.midi_note, voice.volume > 0)
+        except Exception as e:
+            logger.error(f"Error sending all voice updates: {e}")
     
     def start_server(self):
         """Start the OSC server on port 1761"""

@@ -42,8 +42,8 @@ def midi_to_note_name(midi_note: int) -> str:
     return f"{note}{octave}"
 
 def get_active_midi_notes() -> List[int]:
-    """Get list of currently active MIDI notes"""
-    return [voice.midi_note for voice in fibril_system.voices if voice.volume and not voice.sustained]
+    """Get list of currently active MIDI notes (including sustained)"""
+    return [voice.midi_note for voice in fibril_system.voices if voice.volume or voice.sustained]
 
 def get_active_ranks():
     """Get list of currently active ranks (density > 0)"""

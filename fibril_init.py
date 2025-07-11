@@ -103,25 +103,51 @@ class FibrilSystem:
         rank.position = position
     
     def print_system_state(self):
-        """Print current system state for debugging"""
-        print("\n=== FIBRIL System State ===")
-        print(f"Sustain: {self.sustain}")
-        print(f"Key Center: {self.key_center}")
-        print("\nRanks:")
-        for rank in self.ranks:
-            print(f"  Rank {rank.number}: pos={rank.position}, "
-                  f"grey={rank.grey_code}, gci={rank.gci}, density={rank.density}")
-        print("\nActive Voices:")
-        active_voices = [v for v in self.voices if v.volume]
-        if active_voices:
-            for voice in active_voices:
-                # Import here to avoid circular imports
-                from fibril_algorithm import midi_to_note_name
-                note_name = midi_to_note_name(voice.midi_note)
-                print(f"  Voice {voice.id}: MIDI={voice.midi_note} ({note_name}), Volume={voice.volume}")
+        """Print compact system state for debugging"""
+        # Import here to avoid circular imports
+        from fibril_algorithm import midi_to_note_name, get_rank_middle_octave_midi, get_rank_octave_spread
+        
+        # Key center and sustain on one line
+        key_note = midi_to_note_name(60 + self.key_center)  # Convert key center to note
+        print(f"Key: {key_note[0]} | Sustain: {self.sustain}")
+        
+        # Ranks with detailed formatting - only show active ranks
+        active_ranks = [rank for rank in self.ranks if rank.density > 0]
+        if active_ranks:
+            print("Ranks:")
+            for rank in active_ranks:
+                # Calculate tonicization note
+                scale_offsets = [0,2,4,5,7,9,11,10]  # Major scale degrees 1-8
+                tonic_pc = (self.key_center + scale_offsets[rank.tonicization-1]) % 12
+                tonic_note = midi_to_note_name(60 + tonic_pc)[0]  # Just note letter
+                
+                # Calculate spread center and range
+                spread_center = get_rank_middle_octave_midi(rank)
+                spread_range = get_rank_octave_spread(rank)
+                spread_center_note = midi_to_note_name(spread_center)
+                
+                # Format grey code
+                grey_str = ''.join(map(str, rank.grey_code))
+                
+                print(f"  R{rank.number}: pos={rank.position} grey={grey_str} GCI={rank.gci} "
+                      f"dens={rank.density} tonic={tonic_note} "
+                      f"center={spread_center_note} range=±{spread_range}oct")
         else:
-            print("  No active voices")
-        print("=" * 30)
+            print("Ranks: (none active)")
+        
+        # Active voices with compact formatting
+        active_voices = [v for v in self.voices if v.volume or (hasattr(v, 'sustained') and v.sustained)]
+        if active_voices:
+            print("Voices:", end="")
+            for voice in active_voices:
+                note_name = midi_to_note_name(voice.midi_note)
+                vol_indicator = "♪" if voice.volume else "~"  # ♪ for active, ~ for sustained only
+                sust_indicator = "S" if hasattr(voice, 'sustained') and voice.sustained else ""
+                print(f" {voice.id}:{note_name}{vol_indicator}{sust_indicator}", end="")
+            print()  # New line after voices
+        else:
+            print("Voices: (none)")
+        print()  # Extra space after state
 
 
 # Create global system instance
