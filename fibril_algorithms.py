@@ -520,6 +520,7 @@ def probabilistic_voice_allocation(max_voices=48):
     Returns:
         dict: Results including visualization data
     """
+    global probability_map
     print("🎲 Starting probabilistic voice allocation...")
     
     # Initialize tracking
