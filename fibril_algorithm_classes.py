@@ -26,8 +26,8 @@ class AlgorithmParameters:
     MIN_PROBABILITY: float = 1e-8
     
     # Extreme Range Blocking
-    LOW_RANGE_MAX: int = 14
-    HIGH_RANGE_MIN: int = 113
+    LOW_RANGE_MAX: int = 22
+    HIGH_RANGE_MIN: int = 97
     
     # Rank Spread
     STRICT_SPREAD_ENFORCEMENT: bool = True
