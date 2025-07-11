@@ -41,6 +41,11 @@ def midi_to_note_name(midi_note: int) -> str:
     note = note_names[midi_note % 12]
     return f"{note}{octave}"
 
+def pitch_class_to_flat_name(pc: int) -> str:
+    """Convert pitch class (0-11) to note name using flats"""
+    flat_names = ['C', 'Db', 'D', 'Eb', 'E', 'F', 'Gb', 'G', 'Ab', 'A', 'Bb', 'B']
+    return flat_names[pc % 12]
+
 def get_active_midi_notes() -> List[int]:
     """Get list of currently active MIDI notes (including sustained)"""
     return [voice.midi_note for voice in fibril_system.voices if voice.volume or voice.sustained]

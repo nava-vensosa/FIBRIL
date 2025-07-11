@@ -105,21 +105,21 @@ class FibrilSystem:
     def print_system_state(self):
         """Print compact system state for debugging"""
         # Import here to avoid circular imports
-        from fibril_algorithm import midi_to_note_name, get_rank_middle_octave_midi, get_rank_octave_spread
+        from fibril_algorithm import midi_to_note_name, get_rank_middle_octave_midi, get_rank_octave_spread, pitch_class_to_flat_name
         
-        # Key center and sustain on one line
-        key_note = midi_to_note_name(60 + self.key_center)  # Convert key center to note
-        print(f"Key: {key_note[0]} | Sustain: {self.sustain}")
+        # Key center and sustain on one line - use flats for key center
+        key_note = pitch_class_to_flat_name(self.key_center)
+        print(f"Key: {key_note} | Sustain: {self.sustain}")
         
         # Ranks with detailed formatting - only show active ranks
         active_ranks = [rank for rank in self.ranks if rank.density > 0]
         if active_ranks:
             print("Ranks:")
             for rank in active_ranks:
-                # Calculate tonicization note
+                # Calculate tonicization note - use flats
                 scale_offsets = [0,2,4,5,7,9,11,10]  # Major scale degrees 1-8
                 tonic_pc = (self.key_center + scale_offsets[rank.tonicization-1]) % 12
-                tonic_note = midi_to_note_name(60 + tonic_pc)[0]  # Just note letter
+                tonic_note = pitch_class_to_flat_name(tonic_pc)
                 
                 # Calculate spread center and range
                 spread_center = get_rank_middle_octave_midi(rank)
