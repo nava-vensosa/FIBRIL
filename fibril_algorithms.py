@@ -112,12 +112,18 @@ def build_spatial_probability_layer(active_ranks):
             distance = abs(midi - target_center)
             octave_bias = math.exp(-(distance ** 2) / (2 * (cluster_width / 3) ** 2))
             
-            # Anti-muddiness adjustments
-            if midi < 48:
+            # Strong anti-muddiness and extreme range penalties
+            if midi < 36:  # Bottom octave (C1 and below)
+                octave_bias *= 0.05
+            elif midi < 48:  # Low range (C2-B2)
                 octave_bias *= 0.3
-            elif midi < 60:
+            elif midi < 60:  # Mid-low range (C3-B3)
                 octave_bias *= 0.7
-            elif midi > 72:
+            elif midi > 96:  # Top octave (C7 and above)
+                octave_bias *= 0.05
+            elif midi > 84:  # High range (C6-B6)
+                octave_bias *= 0.4
+            elif midi > 72:  # Mid-high range (C5-B5)
                 octave_bias *= 1.2
             
             layer_probabilities[midi] = octave_bias
@@ -132,12 +138,18 @@ def build_spatial_probability_layer(active_ranks):
                 peak_bias = math.exp(-(distance ** 2) / (2 * (18) ** 2))
                 total_bias += peak_bias
             
-            # Anti-muddiness for dispersed mode
-            if midi < 48:
+            # Strong anti-muddiness and extreme range penalties for dispersed mode
+            if midi < 36:  # Bottom octave (C1 and below)
+                total_bias *= 0.02
+            elif midi < 48:  # Low range (C2-B2)
                 total_bias *= 0.1
-            elif midi < 60:
+            elif midi < 60:  # Mid-low range (C3-B3)
                 total_bias *= 0.5
-            elif midi > 72:
+            elif midi > 96:  # Top octave (C7 and above)
+                total_bias *= 0.02
+            elif midi > 84:  # High range (C6-B6)
+                total_bias *= 0.3
+            elif midi > 72:  # Mid-high range (C5-B5)
                 total_bias *= 1.5
             
             layer_probabilities[midi] = total_bias
@@ -512,11 +524,12 @@ def state_readout():
     print(f"  Total ranks: {len(fibril_system.ranks)}")
 
 def deallocate_all_voices():
-    """Deallocate all non-sustained voices for testing"""
+    """Deallocate all non-sustained voices"""
     deallocated = 0
     for voice in fibril_system.voices:
         if voice.volume and not voice.sustained:
             voice.volume = 0
+            voice.midi_note = 0  # Also reset MIDI note for clarity
             deallocated += 1
     print(f"✓ Deallocated {deallocated} voices")
 

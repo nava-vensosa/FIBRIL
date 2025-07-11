@@ -207,6 +207,7 @@ class Rank:
 
 
 @dataclass
+@dataclass
 class Voice:
     """Voice with MIDI note and volume"""
     midi_note: int

@@ -159,16 +159,11 @@ class FibrilMain:
             # Get current state
             current_state = self._get_current_state()
             
-            # Only process if state has changed or enough time has passed
-            current_time = time.time()
-            time_elapsed = current_time - self.last_process_time
-            
-            if (self._has_state_changed(current_state) or 
-                time_elapsed >= self.process_interval):
+            # Only process if state has actually changed
+            if self._has_state_changed(current_state):
                 
                 # Print current system state (only when processing)
-                if self._has_state_changed(current_state):
-                    self.system.print_system_state()
+                self.system.print_system_state()
                 
                 # Clear previous voices if sustain is off
                 if not self.system.sustain:
@@ -177,18 +172,18 @@ class FibrilMain:
                 # Run probabilistic voice allocation
                 result = fibril_algorithms.probabilistic_voice_allocation(max_voices=8)
                 
-                # Send voice updates to MaxMSP
+                # Send all voice states to MaxMSP (always send all voices to ensure consistency)
+                for voice in self.system.voices:
+                    self._send_voice_update(voice.id, voice.midi_note, voice.volume)
+                
+                # Log allocation results
                 if result['allocated'] > 0:
                     active_voices = len(fibril_algorithms.get_active_midi_notes())
                     logger.info(f"Probabilistic allocation: {result['allocated']}/{result['target']} voices, {active_voices} total active")
-                    
-                    # Send all voice states to MaxMSP
-                    for voice in self.system.voices:
-                        self._send_voice_update(voice.id, voice.midi_note, voice.volume)
                 
                 # Update state tracking
                 self.previous_state = current_state
-                self.last_process_time = current_time
+                self.last_process_time = time.time()
                 
         except Exception as e:
             logger.error(f"Error in algorithm processing: {e}")
