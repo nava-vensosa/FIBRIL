@@ -115,7 +115,7 @@ def build_spatial_probability_layer(active_ranks):
     if not active_ranks:
         return layer_probabilities
     
-    # Hard zero ranges: MIDI 0-14 and 113-127
+    # Hard zero ranges: MIDI 0-14 and 113-127 (extreme range blocking)
     for midi in range(15):  # 0-14
         layer_probabilities[midi] = 0.0
     for midi in range(113, 128):  # 113-127
@@ -212,12 +212,25 @@ def build_harmonic_probability_layer(active_ranks, key_center):
     """Build harmonic probability layer based on rank destinations"""
     layer_probabilities = [0.0] * 128
     
+    # Define allowed notes in the key center (major scale)
+    major_scale_offsets = [0, 2, 4, 5, 7, 9, 11]  # Major scale intervals
+    allowed_pitch_classes = set((key_center + offset) % 12 for offset in major_scale_offsets)
+    
+    # Special case: Allow all notes for subtonic rank (it uses whole tone scale)
+    has_subtonic = any(rank.tonicization == 8 for rank in active_ranks)
+    
     for rank in active_ranks:
         harmonic_series = get_rank_harmonic_series(rank, key_center)
         rank_density_multiplier = rank.density * 0.1  # Scale by density
         
         for note, weight in harmonic_series.items():
             if 0 <= note <= 127:
+                note_pc = note % 12
+                
+                # STRICT KEY CENTER ADHERENCE: Only allow notes in key (except subtonic rank)
+                if rank.tonicization != 8 and note_pc not in allowed_pitch_classes:
+                    continue  # Skip notes outside the key
+                
                 # Add weighted probability, scaled by rank density
                 layer_probabilities[note] += weight * (1.0 + rank_density_multiplier)
     
@@ -431,6 +444,72 @@ def clear_visualization_history():
     voice_probability_history = []
     selection_metadata = []
 
+def check_voice_clustering_constraints(candidate_midi, active_notes):
+    """
+    Check if adding a candidate note would violate voice clustering constraints
+    
+    Constraints:
+    1. At least 2 voices must be perfect fifths (7 semitones) within 16 MIDI numbers
+    2. All active voices must cluster within 1–16 MIDI notes (no gaps of 17+)
+    
+    Returns:
+        bool: True if constraints would be satisfied, False if violated
+    """
+    if not active_notes:
+        return True  # No constraints with no active voices
+    
+    # Simulate new voice set
+    future_notes = active_notes + [candidate_midi]
+    future_notes.sort()
+    
+    # Check constraint 1: At least 2 voices must be perfect fifths within 16 MIDI numbers
+    fifth_pairs_found = 0
+    for i, note1 in enumerate(future_notes):
+        for j, note2 in enumerate(future_notes[i+1:], i+1):
+            if abs(note2 - note1) > 16:
+                break  # Too far apart
+            if abs(note2 - note1) % 12 == 7:  # Perfect fifth
+                fifth_pairs_found += 1
+                if fifth_pairs_found >= 1:  # At least one pair (2 voices)
+                    break
+        if fifth_pairs_found >= 1:
+            break
+    
+    # Check constraint 2: No gaps of 17+ MIDI notes
+    max_gap = 0
+    for i in range(len(future_notes) - 1):
+        gap = future_notes[i + 1] - future_notes[i]
+        max_gap = max(max_gap, gap)
+    
+    # Requirements
+    has_fifth_clustering = fifth_pairs_found >= 1
+    has_reasonable_spread = max_gap <= 16
+    
+    return has_fifth_clustering and has_reasonable_spread
+
+def apply_voice_clustering_filter(layer_probabilities, active_notes):
+    """
+    Apply voice clustering filter to probability layer
+    
+    Args:
+        layer_probabilities: List of 128 floats
+        active_notes: List of currently active MIDI notes
+        
+    Returns:
+        List of 128 floats with clustering violations zeroed out
+    """
+    if not active_notes:
+        return layer_probabilities  # No filtering needed with no active voices
+    
+    filtered_probabilities = layer_probabilities.copy()
+    
+    for midi in range(128):
+        if layer_probabilities[midi] > 0:
+            if not check_voice_clustering_constraints(midi, active_notes):
+                filtered_probabilities[midi] = 0.0
+    
+    return filtered_probabilities
+
 def probabilistic_voice_allocation(max_voices=48):
     """
     Main probabilistic voice allocation function
@@ -457,6 +536,8 @@ def probabilistic_voice_allocation(max_voices=48):
     
     print(f"   Target voices: {target_voice_count} (total density), Current: {current_active}")
     print(f"   Active ranks: {[(r.number, r.density) for r in active_ranks]}")
+    print(f"   Key center: {fibril_system.key_center} ({midi_to_note_name(fibril_system.key_center % 12)})")
+    print(f"   Extreme range blocking: MIDI 0-14 and 113-127")
     
     allocated_count = 0
     
@@ -482,6 +563,10 @@ def probabilistic_voice_allocation(max_voices=48):
         
         # Normalize final map
         normalize_probability_map()
+        
+        # Apply voice clustering constraints (after normalization)
+        filtered_map = apply_voice_clustering_filter(probability_map, current_active_notes)
+        probability_map = filtered_map
         
         # Capture snapshot for visualization
         capture_probability_snapshot(voice_number)

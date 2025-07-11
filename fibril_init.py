@@ -69,7 +69,7 @@ class FibrilSystem:
         
         # Global system parameters
         self.sustain = 0
-        self.key_center = 60
+        self.key_center = 0  # C major pitch class (0=C, 1=C#, 2=D, etc.)
     
     def get_rank(self, number: int):
         """Get rank by number (1-8)"""
