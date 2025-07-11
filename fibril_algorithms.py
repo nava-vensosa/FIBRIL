@@ -133,16 +133,20 @@ def build_spatial_probability_layer(active_ranks):
         spread_semitones = octave_spread * 12  # Convert octaves to semitones
         rank_weight = rank.density / sum(r.density for r in active_ranks)  # Normalize by rank importance
         
-        print(f"   Rank {rank.number}: GCI={rank.gci}, density={rank.density}, middle={midi_to_note_name(rank_middle_midi)}, spread=±{octave_spread} oct")
+        print(f"   Rank {rank.number}: GCI={rank.gci}, density={rank.density}, tonicization={rank.tonicization}, middle={midi_to_note_name(rank_middle_midi)}, spread=±{octave_spread} oct")
         
         # Apply Gaussian distribution around rank's middle
         for midi in range(15, 113):  # Only in valid range
             distance = abs(midi - rank_middle_midi)
-            # Gaussian falloff with spread_semitones as standard deviation
-            gaussian_weight = math.exp(-(distance ** 2) / (2 * (spread_semitones / 2) ** 2))
             
-            # Weight by rank's relative importance
-            layer_probabilities[midi] += gaussian_weight * rank_weight
+            # ABSOLUTE SPREAD: Only apply probability if within spread range
+            if distance <= spread_semitones:
+                # Gaussian falloff with spread_semitones as standard deviation
+                gaussian_weight = math.exp(-(distance ** 2) / (2 * (spread_semitones / 2) ** 2))
+                
+                # Weight by rank's relative importance
+                layer_probabilities[midi] += gaussian_weight * rank_weight
+            # else: outside spread range, no probability increase for this rank
     
     # Apply general octave bias (still prefer mid-range over extremes)
     for midi in range(15, 113):
@@ -373,13 +377,22 @@ def allocate_voice_safely(voice_id, midi_note):
         print(f"✗ MIDI note {midi_note} already in use")
         return False
     
+    # Track if this is a reallocation (voice had a different note before)
+    was_reallocated = target_voice.volume > 0 and target_voice.midi_note != midi_note
+    previous_note = target_voice.midi_note if was_reallocated else None
+    
     # Safe to allocate
     target_voice.midi_note = midi_note
     target_voice.volume = 1
     target_voice.sustained = False
     
-    print(f"✓ Allocated MIDI {midi_note} to voice {voice_id}")
-    return True
+    if was_reallocated:
+        previous_note_name = midi_to_note_name(previous_note)
+        print(f"✓ Reallocated MIDI {midi_note} to voice {voice_id} (was {previous_note} {previous_note_name})")
+    else:
+        print(f"✓ Allocated MIDI {midi_note} to voice {voice_id}")
+    
+    return True, was_reallocated, previous_note
 
 def record_selection_metadata(voice_number, selected_note, context):
     """Record metadata about a voice selection for visualization"""
@@ -478,17 +491,32 @@ def probabilistic_voice_allocation(max_voices=48):
         
         # Find available voice and allocate
         voice_id = find_available_voice()
-        if allocate_voice_safely(voice_id, selected_note):
-            allocated_count += 1
+        allocation_result = allocate_voice_safely(voice_id, selected_note)
+        
+        if allocation_result and len(allocation_result) >= 2:
+            success, was_reallocated = allocation_result[0], allocation_result[1]
+            previous_note = allocation_result[2] if len(allocation_result) > 2 else None
             
-            # Record metadata
-            record_selection_metadata(voice_number, selected_note, {
-                'active_ranks': [r.number for r in active_ranks],
-                'voice_id': voice_id
-            })
-            
-            note_name = midi_to_note_name(selected_note)
-            print(f"     Selected MIDI {selected_note} ({note_name}) - Voice {voice_id} (prob: {probability_map[selected_note]:.3f})")
+            if success:
+                allocated_count += 1
+                
+                # Record metadata
+                record_selection_metadata(voice_number, selected_note, {
+                    'active_ranks': [r.number for r in active_ranks],
+                    'voice_id': voice_id,
+                    'was_reallocated': was_reallocated,
+                    'previous_note': previous_note
+                })
+                
+                note_name = midi_to_note_name(selected_note)
+                if was_reallocated and previous_note is not None:
+                    previous_note_name = midi_to_note_name(previous_note)
+                    print(f"     Selected MIDI {selected_note} ({note_name}) from MIDI {previous_note} ({previous_note_name}) - Voice {voice_id} (prob: {probability_map[selected_note]:.3f})")
+                else:
+                    print(f"     Selected MIDI {selected_note} ({note_name}) - Voice {voice_id} (prob: {probability_map[selected_note]:.3f})")
+            else:
+                print(f"     Failed to allocate voice")
+                break
         else:
             print(f"     Failed to allocate voice")
             break
