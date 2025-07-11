@@ -58,7 +58,7 @@ def midi_to_note_name(midi_note):
 def get_rank_middle_octave_midi(rank):
     """Calculate rank's middle octave MIDI note from GCI"""
     middle_c = 60  # MIDI 60 = C4
-    octave_offset = (rank.gci - 5) // 4
+    octave_offset = (rank.gci - 5) // 3
     return middle_c + (octave_offset * 12)
 
 def get_rank_octave_spread(rank):
