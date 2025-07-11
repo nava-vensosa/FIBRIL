@@ -564,26 +564,85 @@ def test_probabilistic_allocation():
 
 
 if __name__ == "__main__":
-    print("Testing probabilistic harmony system...")
+    print("🎵 Probabilistic Harmony System Test")
+    print("="*50)
     
     try:
-        # Simple test
+        # Check system state
+        print("1. Checking system state...")
+        print(f"   System has {len(fibril_system.voices)} voices")
+        print(f"   System has {len(fibril_system.ranks)} ranks")
+        print(f"   Key center: {fibril_system.key_center}")
+        
+        # Check for active ranks
+        print("\n2. Checking active ranks...")
         active_ranks = get_active_ranks()
-        print(f"Found {len(active_ranks)} active ranks")
+        print(f"   Found {len(active_ranks)} active ranks")
         
         if len(active_ranks) == 0:
-            print("No active ranks, simulating some...")
-            fibril_system.ranks[0].density = 2
-            fibril_system.key_center = 60
-            active_ranks = get_active_ranks()
-            print(f"Now have {len(active_ranks)} active ranks")
+            print("   No active ranks detected, setting up test scenario...")
             
-            result = probabilistic_voice_allocation(max_voices=3)
-            print(f"Allocation result: {result}")
+            # Set up test scenario
+            fibril_system.key_center = 60  # C major
+            fibril_system.ranks[0].density = 2  # R1 with density 2
+            fibril_system.ranks[2].density = 1  # R3 with density 1  
+            fibril_system.ranks[4].density = 3  # R5 with density 3
+            
+            # Verify setup
+            active_ranks = get_active_ranks()
+            print(f"   Test setup complete: {len(active_ranks)} active ranks")
+            for rank in active_ranks:
+                print(f"     Rank {rank.number}: density {rank.density}, tonicization {rank.tonicization}")
+        
+        # Test the probabilistic allocation
+        print("\n3. Running probabilistic voice allocation...")
+        result = probabilistic_voice_allocation(max_voices=4)
+        
+        # Show results
+        print(f"\n4. Results:")
+        print(f"   Allocated: {result['allocated']}/{result['target']} voices")
+        print(f"   Spatial mode: {result['spatial_mode']}")
+        
+        # Show visualization data
+        if 'visualization_data' in result:
+            viz = result['visualization_data']
+            print(f"   Visualization data captured: {viz['voice_count']} voice selections")
+            
+            if viz['selections']:
+                print("   Selected notes:")
+                for i, selection in enumerate(viz['selections']):
+                    note = selection['selected_note']
+                    prob = selection['selected_probability']
+                    voice_id = selection.get('voice_id', 'unknown')
+                    print(f"     Voice {i+1}: MIDI {note} (prob: {prob:.3f}, voice_id: {voice_id})")
+        
+        # Show current voice states
+        print("\n5. Current voice states:")
+        active_voices = [(v.id, v.midi_note) for v in fibril_system.voices if v.volume]
+        if active_voices:
+            for voice_id, midi_note in active_voices[:10]:  # Show first 10
+                print(f"   Voice {voice_id}: MIDI {midi_note}")
+            if len(active_voices) > 10:
+                print(f"   ... and {len(active_voices) - 10} more")
+        else:
+            print("   No voices currently active")
+        
+        # Clean up for next run
+        print("\n6. Cleaning up...")
+        deallocate_all_voices()
+        for rank in fibril_system.ranks:
+            rank.density = 0
+        fibril_system.key_center = 0
+        
+        print("✓ Test completed successfully!")
         
     except Exception as e:
-        print(f"Error: {e}")
+        print(f"\n✗ Error during execution: {e}")
         import traceback
         traceback.print_exc()
+        print("\nThis might be due to:")
+        print("- Missing or incomplete fibril_system initialization")
+        print("- Import issues with fibril_classes or fibril_init")
+        print("- System state inconsistencies")
     
-    print("Done!")
+    print("\nDone!")
