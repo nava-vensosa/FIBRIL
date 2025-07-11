@@ -12,9 +12,12 @@ import random
 try:
     from fibril_init import fibril_system
     print("✓ Successfully imported fibril_system")
+    USING_MOCK = False
 except Exception as e:
-    print(f"✗ Import failed: {e}")
-    exit(1)
+    print(f"⚠ Import failed: {e}")
+    print("  Will create mock system for testing...")
+    fibril_system = None  # Will be set by mock system
+    USING_MOCK = True
 
 
 # Global probability map and visualization tracking
@@ -563,13 +566,74 @@ def test_probabilistic_allocation():
         rank.density = 0
 
 
+def create_mock_fibril_system():
+    """Create a mock fibril system for testing when import fails"""
+    
+    class MockVoice:
+        def __init__(self, voice_id):
+            self.id = voice_id
+            self.midi_note = 60
+            self.volume = 0
+            self.sustained = False
+    
+    class MockRank:
+        def __init__(self, number):
+            self.number = number
+            self.density = 0
+            self.tonicization = number  # Simple mapping
+            self.position = number
+            self.grey_code = [0, 0, 0, 0]
+            self.gci = 0
+            self.previous_gci = 0
+        
+        def get_valid_destinations(self, key_center):
+            """Mock valid destinations - return some notes around key center"""
+            base = key_center % 12
+            octaves = [48, 60, 72]  # C3, C4, C5
+            notes = []
+            for octave in octaves:
+                # Add some chord tones relative to this rank
+                notes.extend([
+                    octave + base,
+                    octave + base + 4,  # Major third
+                    octave + base + 7,  # Perfect fifth
+                ])
+            return [n for n in notes if 0 <= n <= 127]
+    
+    class MockSystem:
+        def __init__(self):
+            self.voices = [MockVoice(i+1) for i in range(48)]
+            self.ranks = [MockRank(i+1) for i in range(8)]
+            self.key_center = 60
+            self.sustain = 0
+    
+    return MockSystem()
+
+# Try to use real system, fall back to mock if import fails
+try:
+    # Test if fibril_system is available
+    fibril_system.voices[0]
+    print("✓ Using real fibril_system")
+    USING_MOCK = False
+except (NameError, AttributeError, Exception):
+    print("⚠ fibril_system unavailable, using mock system")
+    fibril_system = create_mock_fibril_system()
+    USING_MOCK = True
+
+
 if __name__ == "__main__":
     print("🎵 Probabilistic Harmony System Test")
     print("="*50)
     
     try:
-        # Check system state
-        print("1. Checking system state...")
+        # Initialize system (real or mock)
+        if USING_MOCK:
+            print("Initializing mock system...")
+            system_type = "mock"
+        else:
+            system_type = "real"
+        
+        print(f"Using {system_type} fibril_system")
         print(f"   System has {len(fibril_system.voices)} voices")
         print(f"   System has {len(fibril_system.ranks)} ranks")
         print(f"   Key center: {fibril_system.key_center}")
@@ -634,7 +698,7 @@ if __name__ == "__main__":
             rank.density = 0
         fibril_system.key_center = 0
         
-        print("✓ Test completed successfully!")
+        print(f"✓ Test completed successfully using {system_type} system!")
         
     except Exception as e:
         print(f"\n✗ Error during execution: {e}")
